@@ -193,35 +193,11 @@ class GENEActiv:
 
         print("\n-----------------------------------------------------------------------------------------------------")
 
-        # Formats arguments as datetimes ------------------------------------------------------------------------------
+        # Gets appropriate timestamps
+        start, stop = self.get_timestamps(start, stop)
 
-        # If arguments are given and no previous region has been specified
-        if start is not None and self.start_stamp is None:
-            start = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
-            self.start_stamp = start
-        if stop is not None and self.stop_stamp is None:
-            stop = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
-            self.stop_stamp = stop
-
-        # If arguments not given and no stamps from previous region
-        if start is None and self.start_stamp is None:
-            try:
-                start = self.df_hip["Timestamp"][0]
-            except (AttributeError, ValueError):
-                start = self.df_wrist["Timestamp"][0]
-
-        if stop is None and self.stop_stamp is None:
-            try:
-                stop = self.df_hip["Timestamp"].iloc[-1]
-            except (AttributeError, ValueError):
-                stop = self.df_wrist["Timestamp"].iloc[-1]
-
-        # If are not given and there are stamps from previous region
-        if start is None and self.start_stamp is not None:
-            print("Plotting previously-plotted region.")
-            start = self.start_stamp
-        if stop is None and self.stop_stamp is not None:
-            stop = self.stop_stamp
+        self.start_stamp = start
+        self.stop_stamp = stop
 
         # Crops dataframes to selected region -------------------------------------------------------------------------
         if self.hip_fname is not None:
@@ -375,34 +351,8 @@ class GENEActiv:
         if data_type == "wrist" or data_type == "Wrist":
             df = self.df_wrist
 
-        # Formats arguments as datetimes -----------------------------------------------------------------------------
-
-        # If arguments are given and no previous region has been specified
-        if start is not None and self.start_stamp is None:
-            start = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
-        if stop is not None and self.stop_stamp is None:
-            stop = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
-
-        # If arguments not given and no stamps from previous region
-        # Sets start/stop to first/last timestamp for hip or wrist data
-        if start is None and self.start_stamp is None:
-            try:
-                start = self.df_hip["Timestamp"].iloc[0]
-            except (AttributeError, ValueError):
-                start = self.df_wrist["Timestamp"].iloc[0]
-
-        if stop is None and self.stop_stamp is None:
-            try:
-                stop = self.df_hip["Timestamp"].iloc[-1]
-            except (AttributeError, ValueError):
-                stop = self.df_wrist["Timestamp"].iloc[-1]
-
-        # If arguments are not given and there are stamps from previous region
-        if start is None and self.start_stamp is not None:
-            print("Plotting previously-plotted region.")
-            start = self.start_stamp
-        if stop is None and self.stop_stamp is not None:
-            stop = self.stop_stamp
+        # Gets appropriate timestamps
+        start, stop = self.get_timestamps(start, stop)
 
         # Sets 'memory' values to current start/stop values
         self.start_stamp = start
@@ -462,14 +412,47 @@ class GENEActiv:
         ax2.xaxis.set_major_locator(locator)
         plt.xticks(rotation=45, fontsize=6)
 
+    def get_timestamps(self, start=None, stop=None):
+
+        # Formats arguments as datetimes -----------------------------------------------------------------------------
+
+        # If arguments are given and no previous region has been specified
+        if start is not None and self.start_stamp is None:
+            start = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+        if stop is not None and self.stop_stamp is None:
+            stop = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
+
+        # If arguments not given and no stamps from previous region
+        # Sets start/stop to first/last timestamp for hip or wrist data
+        if start is None and self.start_stamp is None:
+            try:
+                start = self.df_hip["Timestamp"].iloc[0]
+            except (AttributeError, ValueError):
+                start = self.df_wrist["Timestamp"].iloc[0]
+
+        if stop is None and self.stop_stamp is None:
+            try:
+                stop = self.df_hip["Timestamp"].iloc[-1]
+            except (AttributeError, ValueError):
+                stop = self.df_wrist["Timestamp"].iloc[-1]
+
+        # If arguments are not given and there are stamps from previous region
+        if start is None and self.start_stamp is not None:
+            print("Plotting previously-plotted region.")
+            start = self.start_stamp
+        if stop is None and self.stop_stamp is not None:
+            stop = self.stop_stamp
+
+        return start, stop
+
 
 # Creates data objects
-# x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF")
+x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF")
 
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
 # Filtering
-# x.filter_signal(data_type='hip', type="bandpass", low_f=1, high_f=10, sample_f=75, filter_order=5)
+x.filter_signal(data_type='hip', type="bandpass", low_f=1, high_f=10, sample_f=75, filter_order=5)
 
 # Plots section of data between start and stop arguments. Formatted as YYYY-MM-DD HH:MM:SS
 # x.plot_data(start="2019-10-03 10:34:00", stop="2019-10-03 11:15:00", downsample_factor=1) # Section of data
