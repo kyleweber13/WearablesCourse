@@ -6,7 +6,7 @@ from datetime import timedelta
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
-from scipy.signal import butter, lfilter, filtfilt
+from scipy.signal import butter, filtfilt
 
 
 class GENEActiv:
