@@ -464,7 +464,7 @@ class GENEActiv:
 
 
 # Creates data objects
-x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF")
+# x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF")
 
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
