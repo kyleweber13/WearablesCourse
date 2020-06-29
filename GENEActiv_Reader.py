@@ -196,7 +196,7 @@ class GENEActiv:
             -sample_f: sample rate, Hz
             -filter_order: integet for filter order
 
-        Adds columns to dataframe corresponding to "data_type" argument of filtered data
+        Adds columns to dataframe corresponding to each device. Filters all devices that are available.
         """
 
         for data_type in ["wrist", "hip", "lankle", "rankle"]:
@@ -623,7 +623,7 @@ class GENEActiv:
 
         # Determines number of subplots and formatting
         if self.hip_fname is not None and (self.lankle_fname is not None or self.rankle_fname is not None):
-            fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col')
+            fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col', figsize=(12, 7))
 
             ax2.set_ylabel("G")
 
@@ -631,7 +631,7 @@ class GENEActiv:
                 ax2.axhline(y=peak_thresh, color='green', linestyle='dashed', label="{} G".format(peak_thresh))
 
         else:
-            fig, ax1 = plt.subplots(1, 1)
+            fig, ax1 = plt.subplots(1, 1, figsize=(12, 7))
 
             xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
             ax1.xaxis.set_major_formatter(xfmt)
@@ -696,7 +696,6 @@ x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.E
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
 # Filtering
-# x.filter_signal(data_type='hip', type="bandpass", low_f=1, high_f=10, sample_f=75, filter_order=5)
 x.filter_signal2(type="bandpass", low_f=1, high_f=10, filter_order=3)
 
 
