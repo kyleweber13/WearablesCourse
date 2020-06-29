@@ -7,18 +7,23 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import os
 from scipy.signal import butter, filtfilt
+import peakutils
 
 
 class GENEActiv:
 
-    def __init__(self, wrist_filepath=None, hip_filepath=None):
+    def __init__(self, wrist_filepath=None, hip_filepath=None, leftankle_filepath=None, rightankle_filepath=None):
         """Class that reads in GENEActiv data in EDF format."""
 
         self.wrist_fname = wrist_filepath
         self.hip_fname = hip_filepath
+        self.lankle_fname = leftankle_filepath
+        self.rankle_fname = rightankle_filepath
 
         self.df_wrist, self.wrist_samplerate = self.load_correct_file(filepath=self.wrist_fname, f_type="wrist")
         self.df_hip, self.hip_samplerate = self.load_correct_file(filepath=self.hip_fname, f_type="hip")
+        self.df_lankle, self.lankle_samplerate = self.load_correct_file(filepath=self.lankle_fname, f_type="lankle")
+        self.df_rankle, self.rankle_samplerate = self.load_correct_file(filepath=self.rankle_fname, f_type="rankle")
 
         # 'Memory' stamps for previously-graphed region
         self.start_stamp = None
@@ -144,6 +149,12 @@ class GENEActiv:
         if data_type == "hip" or data_type == "Hip":
             data = np.array([self.df_hip["X"], self.df_hip["Y"], self.df_hip["Z"]])
             original_df = self.df_hip
+        if data_type == "lankle" or data_type == "left ankle":
+            data = np.array([self.df_lankle["X"], self.df_lankle["Y"], self.df_lankle["Z"]])
+            original_df = self.df_lankle
+        if data_type == "rankle" or data_type == "right ankle":
+            data = np.array([self.df_rankle["X"], self.df_rankle["Y"], self.df_rankle["Z"]])
+            original_df = self.df_rankle
 
         if type == "lowpass":
             print("\nFiltering {} accelerometer data with {}Hz, order {} lowpass filter.".format(data_type,
@@ -174,6 +185,73 @@ class GENEActiv:
         original_df["X_filt"] = filtered_data[0]
         original_df["Y_filt"] = filtered_data[1]
         original_df["Z_filt"] = filtered_data[2]
+
+    def filter_signal2(self, type="bandpass", low_f=1, high_f=10, filter_order=1):
+        """Filtering details: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.filtfilt.html
+
+        Arguments:
+            -type: filter type - "bandpass", "lowpass", or "highpass"
+            -low_f: low-end cutoff frequency, required for lowpass and bandpass filters
+            -high_f: high-end cutoff frequency, required for highpass and bandpass filters
+            -sample_f: sample rate, Hz
+            -filter_order: integet for filter order
+
+        Adds columns to dataframe corresponding to "data_type" argument of filtered data
+        """
+
+        for data_type in ["wrist", "hip", "lankle", "rankle"]:
+
+           # DATA SET UP
+            if data_type == "wrist" and self.wrist_fname is not None:
+                data = np.array([self.df_wrist["X"], self.df_wrist["Y"], self.df_wrist["Z"]])
+                original_df = self.df_wrist
+                fs = self.wrist_samplerate * .5
+
+            if data_type == "hip" and self.hip_fname is not None:
+                data = np.array([self.df_hip["X"], self.df_hip["Y"], self.df_hip["Z"]])
+                original_df = self.df_hip
+                fs = self.hip_samplerate * .5
+
+            if data_type == "lankle" and self.lankle_fname is not None:
+                data = np.array([self.df_lankle["X"], self.df_lankle["Y"], self.df_lankle["Z"]])
+                original_df = self.df_lankle
+                fs = self.lankle_samplerate * .5
+
+            if data_type == "rankle" and self.rankle_fname is not None:
+                data = np.array([self.df_rankle["X"], self.df_rankle["Y"], self.df_rankle["Z"]])
+                original_df = self.df_rankle
+                fs = self.rankle_samplerate * .5
+
+            # FILTERING TYPES
+            if type == "lowpass":
+                print("\nFiltering {} accelerometer data with {}Hz, order {} lowpass filter.".format(data_type,
+                                                                                                     low_f,
+                                                                                                     filter_order))
+                low = low_f / fs
+                b, a = butter(N=filter_order, Wn=low, btype="lowpass")
+                filtered_data = filtfilt(b, a, x=data)
+
+            if type == "highpass":
+                print("\nFiltering {} accelerometer data with {}Hz, order {} highpass filter.".format(data_type,
+                                                                                                      high_f,
+                                                                                                      filter_order))
+                high = high_f / fs
+                b, a = butter(N=filter_order, Wn=high, btype="highpass")
+                filtered_data = filtfilt(b, a, x=data)
+
+            if type == "bandpass":
+                print("\nFiltering {} accelerometer data with {}-{}Hz, order {} bandpass filter.".format(data_type,
+                                                                                                         low_f, high_f,
+                                                                                                         filter_order))
+
+                low = low_f / fs
+                high = high_f / fs
+                b, a = butter(N=filter_order, Wn=[low, high], btype="bandpass")
+                filtered_data = filtfilt(b, a, x=data)
+
+            original_df["X_filt"] = filtered_data[0]
+            original_df["Y_filt"] = filtered_data[1]
+            original_df["Z_filt"] = filtered_data[2]
 
     def plot_data(self, start=None, stop=None, downsample_factor=1):
         """Plots hip and wrist data whichever/both is available.
@@ -258,8 +336,8 @@ class GENEActiv:
         if self.hip_fname is not None and self.wrist_fname is not None:
 
             def plot_wrist_hip():
-                fig, (ax1, ax2) = plt.subplots(2, sharex='col')
-                plt.subplots_adjust(bottom=.17)
+                fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(12, 7))
+                plt.subplots_adjust(bottom=.17, hspace=.33)
 
                 ax1.set_title("{}".format(self.wrist_fname))
                 ax1.plot(df_wrist["Timestamp"], df_wrist["X"], color='red', label="Wrist_X")
@@ -269,9 +347,9 @@ class GENEActiv:
                 ax1.set_ylabel("G")
 
                 ax2.set_title("{}".format(self.hip_fname.split("/")[-1]))
-                ax2.plot(df_hip["Timestamp"], df_hip["X"], color='red', label="hip_X")
-                ax2.plot(df_hip["Timestamp"], df_hip["Y"], color='black', label="hip_Y")
-                ax2.plot(df_hip["Timestamp"], df_hip["Z"], color='blue', label="hip_Z")
+                ax2.plot(df_hip["Timestamp"], df_hip["X"], color='red', label="Hip_X")
+                ax2.plot(df_hip["Timestamp"], df_hip["Y"], color='black', label="Hip_Y")
+                ax2.plot(df_hip["Timestamp"], df_hip["Z"], color='blue', label="Hip_Z")
                 ax2.legend()
                 ax2.set_ylabel("G")
 
@@ -287,7 +365,7 @@ class GENEActiv:
         if self.hip_fname is None and self.wrist_fname is not None:
 
             def plot_wrist():
-                fig, ax1 = plt.subplots(1)
+                fig, ax1 = plt.subplots(1, figsize=(12, 7))
                 plt.subplots_adjust(bottom=.17)
 
                 ax1.set_title("{}".format(self.wrist_fname.split("/")[-1]))
@@ -309,13 +387,13 @@ class GENEActiv:
         if self.hip_fname is not None and self.wrist_fname is None:
 
             def plot_hip():
-                fig, ax1 = plt.subplots(1)
+                fig, ax1 = plt.subplots(1, figsize=(12, 7))
                 plt.subplots_adjust(bottom=.17)
 
                 ax1.set_title("{}".format(self.hip_fname.split("/")[-1]))
-                ax1.plot(df_hip["Timestamp"], df_hip["X"], color='red', label="hip_X")
-                ax1.plot(df_hip["Timestamp"], df_hip["Y"], color='black', label="hip_Y")
-                ax1.plot(df_hip["Timestamp"], df_hip["Z"], color='blue', label="hip_Z")
+                ax1.plot(df_hip["Timestamp"], df_hip["X"], color='red', label="Hip_X")
+                ax1.plot(df_hip["Timestamp"], df_hip["Y"], color='black', label="Hip_Y")
+                ax1.plot(df_hip["Timestamp"], df_hip["Z"], color='blue', label="Hip_Z")
                 ax1.legend()
                 ax1.set_ylabel("G")
 
@@ -391,8 +469,8 @@ class GENEActiv:
         locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
 
         # PLOTTING ----------------------------------------------------------------------------------------------------
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col')
-        plt.subplots_adjust(bottom=.17)
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col', figsize=(12, 7))
+        plt.subplots_adjust(bottom=.17, hspace=.33)
 
         ax1.set_title("Raw {} data".format(data_type))
         ax1.plot(df["Timestamp"], df["X"], label="X")
@@ -445,14 +523,182 @@ class GENEActiv:
 
         return start, stop
 
+    def plot_peaks(self, data_type="Hip", signal="X", thresh_type="normalized",
+                   peak_thresh=0.5, min_peak_dist=500, downsample_ratio=1):
+        """"Function that runs peakutils to detect peaks in accelerometer data and plots results.
+
+            :argument
+            -data_type: "hip" or "wrist" to specifcy device
+            -signal: what data to run the peak detection on. Must be a column name contained within df_wrist or df_hip
+                -Options: "X", "Y", "Z", "Mag", "X_filt", "Y_filt", "Z_filt"
+            -thresh_type: either "normalized" or "absolute".
+            -peak_threshold: value to set threshold based on thresh_type. If thresh_type="normalized", peak_threshold
+                             is a value from 0 to 1 that represents the threshold as a percent of the signal amplitude.
+                             If thresh_type="absolute", the threshold can be any value that corresponds to G's
+            -min_peak_dist: number of milliseconds required between consecutive peaks
+            -downsample_ratio: ratio by which data are downsampled
+        """
+
+        if data_type == "hip" or data_type == "Hip":
+            data = self.df_hip
+            fs = self.hip_samplerate
+        if data_type == "wrist" or data_type == "Wrist":
+            data = self.df_wrist
+            fs = self.wrist_samplerate
+
+        peak_inds = peakutils.indexes(y=data[signal], thres_abs=True if thresh_type == "absolute" else False,
+                                      thres=peak_thresh, min_dist=int(min_peak_dist / (1000 / fs)))
+
+        if downsample_ratio > 1:
+            peak_inds = [int(i / downsample_ratio) for i in peak_inds]
+
+            data = data.iloc[::downsample_ratio, :]
+
+        # PLOTTING ---------------------------------------------------------------------------------------------------
+        fig, ax1 = plt.subplots(1)
+        plt.subplots_adjust(bottom=.25)
+
+        plt.plot(data["Timestamp"], data[signal],
+                 color='black', label="{}_{}".format(data_type, signal))
+
+        plt.plot([data["Timestamp"].iloc[i] for i in peak_inds],
+                 [data[signal].iloc[i] for i in peak_inds],
+                 color='red', marker="o", linestyle="", label="Peaks (n={})".format(len(peak_inds)))
+        plt.ylabel("G")
+        plt.title("{} accel, signal={}, peak_thresh={}, "
+                  "thresh_type={}, min_dist={} ms, downsample={}".format(data_type, signal, peak_thresh,
+                                                                         thresh_type, min_peak_dist, downsample_ratio))
+
+        plt.legend()
+
+        if thresh_type == "absolute":
+            plt.axhline(y=peak_thresh, color='green', linestyle='dashed', label="{} G".format(peak_thresh))
+
+        xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
+
+        # locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
+        ax1.xaxis.set_major_formatter(xfmt)
+        # ax1.xaxis.set_major_locator(locator)
+        plt.xticks(rotation=45, fontsize=6)
+
+    def plot_peaks2(self, signal="X", thresh_type="normalized",
+                    peak_thresh=0.5, min_peak_dist=500, downsample_ratio=1):
+        """"Function that runs peakutils to detect peaks in accelerometer data and plots results.
+
+            :argument
+            -signal: what data to run the peak detection on. Must be a column name contained within df_wrist or df_hip
+                -Options: "X", "Y", "Z", "Mag", "X_filt", "Y_filt", "Z_filt"
+            -thresh_type: either "normalized" or "absolute".
+            -peak_threshold: value to set threshold based on thresh_type. If thresh_type="normalized", peak_threshold
+                             is a value from 0 to 1 that represents the threshold as a percent of the signal amplitude.
+                             If thresh_type="absolute", the threshold can be any value that corresponds to G's
+            -min_peak_dist: number of milliseconds required between consecutive peaks
+            -downsample_ratio: ratio by which data are downsampled
+        """
+
+        hip_data = self.df_hip
+        hip_fs = self.hip_samplerate
+
+        la_data = self.df_lankle
+        la_fs = self.lankle_samplerate
+
+        ra_data = self.df_rankle
+        ra_fs = self.rankle_samplerate
+
+        # PEAK DETECTION ---------------------------------------------------------------------------------------------
+
+        if self.hip_fname is not None:
+            hip_peaks = peakutils.indexes(y=hip_data[signal], thres_abs=True if thresh_type == "absolute" else False,
+                                          thres=peak_thresh, min_dist=int(min_peak_dist / (1000 / hip_fs)))
+
+        if self.lankle_fname is not None:
+            la_peaks = peakutils.indexes(y=la_data[signal], thres_abs=True if thresh_type == "absolute" else False,
+                                         thres=peak_thresh, min_dist=int(min_peak_dist / (1000 / la_fs)))
+
+        if self.rankle_fname is not None:
+            ra_peaks = peakutils.indexes(y=ra_data[signal], thres_abs=True if thresh_type == "absolute" else False,
+                                         thres=peak_thresh, min_dist=int(min_peak_dist / (1000 / ra_fs)))
+
+        # PLOTTING ---------------------------------------------------------------------------------------------------
+
+        # Determines number of subplots and formatting
+        if self.hip_fname is not None and (self.lankle_fname is not None or self.rankle_fname is not None):
+            fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col')
+
+            ax2.set_ylabel("G")
+
+            if thresh_type == "absolute":
+                ax2.axhline(y=peak_thresh, color='green', linestyle='dashed', label="{} G".format(peak_thresh))
+
+        else:
+            fig, ax1 = plt.subplots(1, 1)
+
+            xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
+            ax1.xaxis.set_major_formatter(xfmt)
+            plt.xticks(rotation=45, fontsize=6)
+
+        plt.subplots_adjust(bottom=.25)
+
+        # HIP DATA -------------------------------------
+        ax1.plot(hip_data["Timestamp"], hip_data[signal],
+                 color='black', label="{}".format(signal))
+
+        ax1.plot([hip_data["Timestamp"].iloc[i] for i in hip_peaks],
+                 [hip_data[signal].iloc[i] for i in hip_peaks],
+                 color='red', marker="o", linestyle="", label="Peaks (n={})".format(len(hip_peaks)))
+        ax1.set_ylabel("G")
+        ax1.set_title("Signal={}, peak_thresh={}, "
+                      "thresh_type={}, min_dist={} ms, downsample={}".format(signal, peak_thresh,
+                                                                             thresh_type, min_peak_dist,
+                                                                             downsample_ratio))
+
+        ax1.legend()
+
+        if self.lankle_fname is None and self.rankle_fname is None:
+            xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
+            ax1.xaxis.set_major_formatter(xfmt)
+            plt.xticks(rotation=45, fontsize=6)
+
+        # ANKLE DATA ------------------------------------
+        if self.lankle_fname is not None and self.rankle_fname is not None:
+
+            # Left ankle
+            ax2.plot(la_data["Timestamp"], la_data[signal],
+                     color='black', label="LA_{}".format(signal))
+
+            ax2.plot([la_data["Timestamp"].iloc[i] for i in la_peaks],
+                     [la_data[signal].iloc[i] for i in la_peaks],
+                     color='red', marker="o", linestyle="", label="LA peaks (n={})".format(len(la_peaks)))
+
+            # Right ankle
+            ax2.plot(ra_data["Timestamp"], ra_data[signal],
+                     color='grey', label="RA_{}".format(signal))
+
+            ax2.plot([ra_data["Timestamp"].iloc[i] for i in ra_peaks],
+                     [ra_data[signal].iloc[i] for i in ra_peaks],
+                     color='cyan', marker="X", linestyle="", label="RA peaks (n={})".format(len(ra_peaks)))
+
+            ax2.set_xlim(la_data.iloc[0]["Timestamp"], la_data.iloc[-1]["Timestamp"])
+
+            ax2.legend()
+
+            xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
+            ax2.xaxis.set_major_formatter(xfmt)
+            plt.xticks(rotation=45, fontsize=6)
+
 
 # Creates data objects
-x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF")
+x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF",
+              wrist_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF",
+              leftankle_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF",
+              rightankle_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF")
 
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
 # Filtering
-x.filter_signal(data_type='hip', type="bandpass", low_f=1, high_f=10, sample_f=75, filter_order=5)
+# x.filter_signal(data_type='hip', type="bandpass", low_f=1, high_f=10, sample_f=75, filter_order=5)
+x.filter_signal2(type="bandpass", low_f=1, high_f=10, filter_order=3)
+
 
 # Plots section of data between start and stop arguments. Formatted as YYYY-MM-DD HH:MM:SS
 # x.plot_data(start="2019-10-03 10:34:00", stop="2019-10-03 11:15:00", downsample_factor=1) # Section of data
@@ -464,3 +710,8 @@ x.filter_signal(data_type='hip', type="bandpass", low_f=1, high_f=10, sample_f=7
 
 # Clearing data cropping 'memory'
 # x.start_stamp, x.stop_stamp = None, None
+# x.plot_peaks(data_type="Hip", signal="X_filt", thresh_type="absolute",
+#              peak_thresh=1.25, min_peak_dist=400, downsample_ratio=1)
+
+
+x.plot_peaks2(signal="X_filt", thresh_type="absolute", peak_thresh=1.25, min_peak_dist=400, downsample_ratio=1)
