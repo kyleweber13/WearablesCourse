@@ -201,7 +201,7 @@ class GENEActiv:
 
         for data_type in ["wrist", "hip", "lankle", "rankle"]:
 
-           # DATA SET UP
+            # DATA SET UP
             if data_type == "wrist" and self.wrist_fname is not None:
                 data = np.array([self.df_wrist["X"], self.df_wrist["Y"], self.df_wrist["Z"]])
                 original_df = self.df_wrist
@@ -523,66 +523,9 @@ class GENEActiv:
 
         return start, stop
 
-    def plot_peaks(self, data_type="Hip", signal="X", thresh_type="normalized",
-                   peak_thresh=0.5, min_peak_dist=500, downsample_ratio=1):
-        """"Function that runs peakutils to detect peaks in accelerometer data and plots results.
-
-            :argument
-            -data_type: "hip" or "wrist" to specifcy device
-            -signal: what data to run the peak detection on. Must be a column name contained within df_wrist or df_hip
-                -Options: "X", "Y", "Z", "Mag", "X_filt", "Y_filt", "Z_filt"
-            -thresh_type: either "normalized" or "absolute".
-            -peak_threshold: value to set threshold based on thresh_type. If thresh_type="normalized", peak_threshold
-                             is a value from 0 to 1 that represents the threshold as a percent of the signal amplitude.
-                             If thresh_type="absolute", the threshold can be any value that corresponds to G's
-            -min_peak_dist: number of milliseconds required between consecutive peaks
-            -downsample_ratio: ratio by which data are downsampled
-        """
-
-        if data_type == "hip" or data_type == "Hip":
-            data = self.df_hip
-            fs = self.hip_samplerate
-        if data_type == "wrist" or data_type == "Wrist":
-            data = self.df_wrist
-            fs = self.wrist_samplerate
-
-        peak_inds = peakutils.indexes(y=data[signal], thres_abs=True if thresh_type == "absolute" else False,
-                                      thres=peak_thresh, min_dist=int(min_peak_dist / (1000 / fs)))
-
-        if downsample_ratio > 1:
-            peak_inds = [int(i / downsample_ratio) for i in peak_inds]
-
-            data = data.iloc[::downsample_ratio, :]
-
-        # PLOTTING ---------------------------------------------------------------------------------------------------
-        fig, ax1 = plt.subplots(1)
-        plt.subplots_adjust(bottom=.25)
-
-        plt.plot(data["Timestamp"], data[signal],
-                 color='black', label="{}_{}".format(data_type, signal))
-
-        plt.plot([data["Timestamp"].iloc[i] for i in peak_inds],
-                 [data[signal].iloc[i] for i in peak_inds],
-                 color='red', marker="o", linestyle="", label="Peaks (n={})".format(len(peak_inds)))
-        plt.ylabel("G")
-        plt.title("{} accel, signal={}, peak_thresh={}, "
-                  "thresh_type={}, min_dist={} ms, downsample={}".format(data_type, signal, peak_thresh,
-                                                                         thresh_type, min_peak_dist, downsample_ratio))
-
-        plt.legend()
-
-        if thresh_type == "absolute":
-            plt.axhline(y=peak_thresh, color='green', linestyle='dashed', label="{} G".format(peak_thresh))
-
-        xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
-
-        # locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
-        ax1.xaxis.set_major_formatter(xfmt)
-        # ax1.xaxis.set_major_locator(locator)
-        plt.xticks(rotation=45, fontsize=6)
-
-    def plot_peaks2(self, signal="X", thresh_type="normalized",
-                    peak_thresh=0.5, min_peak_dist=500, downsample_ratio=1):
+    def plot_peaks(self, signal="X", thresh_type="normalized",
+                   peak_thresh=0.5, min_peak_dist=500, downsample_factor=1,
+                   start=None, stop=None):
         """"Function that runs peakutils to detect peaks in accelerometer data and plots results.
 
             :argument
@@ -593,31 +536,66 @@ class GENEActiv:
                              is a value from 0 to 1 that represents the threshold as a percent of the signal amplitude.
                              If thresh_type="absolute", the threshold can be any value that corresponds to G's
             -min_peak_dist: number of milliseconds required between consecutive peaks
-            -downsample_ratio: ratio by which data are downsampled
+            -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS"
+            -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS"
+            -downsample_factor: ratio by which data are downsampled. E.g. downsample=3 will downsample from 75 to 25 Hz
+
+        If start and stop are not specified, data will be cropped to one of the following:
+        -If no previous graphs have been generated, it will plot the entire data file
+        -If a previous crop has occurred, it will 'remember' that region and plot it again.
+
+        To clear the 'memory' of previously-plotted regions, enter "x.start_stamp=None"
+        and "x.stop_stop=None" in console
         """
 
-        hip_data = self.df_hip
-        hip_fs = self.hip_samplerate
+        # Gets appropriate timestamps
+        start, stop = self.get_timestamps(start, stop)
 
-        la_data = self.df_lankle
-        la_fs = self.lankle_samplerate
+        # Window length in minutes
+        try:
+            window_len = (stop - start).seconds / 60
+        except TypeError:
+            window_len = (datetime.strptime(stop, "%Y-%m-%d %H:%M:%S") -
+                          datetime.strptime(start, "%Y-%m-%d %H:%M:%S")).seconds / 60
 
-        ra_data = self.df_rankle
-        ra_fs = self.rankle_samplerate
+        print("\nPlotting {} minute section from {} to {}.".format(window_len, start, stop))
+
+        # Sets 'memory' values to current start/stop values
+        self.start_stamp = start
+        self.stop_stamp = stop
 
         # PEAK DETECTION ---------------------------------------------------------------------------------------------
 
         if self.hip_fname is not None:
-            hip_peaks = peakutils.indexes(y=hip_data[signal], thres_abs=True if thresh_type == "absolute" else False,
-                                          thres=peak_thresh, min_dist=int(min_peak_dist / (1000 / hip_fs)))
+            hip_data = self.df_hip.loc[(self.df_hip["Timestamp"] > start) & (self.df_hip["Timestamp"] < stop)]
+            hip_data = hip_data.iloc[::downsample_factor, :]
+
+            hip_fs = self.hip_samplerate
+
+            hip_peaks = peakutils.indexes(y=np.array(hip_data[signal]),
+                                          thres_abs=True if thresh_type == "absolute" else False,
+                                          thres=peak_thresh,
+                                          min_dist=int(min_peak_dist / downsample_factor / (1000 / hip_fs)))
 
         if self.lankle_fname is not None:
-            la_peaks = peakutils.indexes(y=la_data[signal], thres_abs=True if thresh_type == "absolute" else False,
-                                         thres=peak_thresh, min_dist=int(min_peak_dist / (1000 / la_fs)))
+            la_data = self.df_lankle.loc[(self.df_lankle["Timestamp"] >= start) & (self.df_lankle["Timestamp"] < stop)]
+            la_data = la_data.iloc[::downsample_factor, :]
+            la_fs = self.lankle_samplerate
+
+            la_peaks = peakutils.indexes(y=np.array(la_data[signal]),
+                                         thres_abs=True if thresh_type == "absolute" else False,
+                                         thres=peak_thresh,
+                                         min_dist=int(min_peak_dist / downsample_factor / (1000 / la_fs)))
 
         if self.rankle_fname is not None:
-            ra_peaks = peakutils.indexes(y=ra_data[signal], thres_abs=True if thresh_type == "absolute" else False,
-                                         thres=peak_thresh, min_dist=int(min_peak_dist / (1000 / ra_fs)))
+            ra_data = self.df_rankle.loc[(self.df_rankle["Timestamp"] >= start) & (self.df_rankle["Timestamp"] < stop)]
+            ra_data = ra_data.iloc[::downsample_factor, :]
+            ra_fs = self.rankle_samplerate
+
+            ra_peaks = peakutils.indexes(y=np.array(ra_data[signal]),
+                                         thres_abs=True if thresh_type == "absolute" else False,
+                                         thres=peak_thresh,
+                                         min_dist=int(min_peak_dist / downsample_factor / (1000 / ra_fs)))
 
         # PLOTTING ---------------------------------------------------------------------------------------------------
 
@@ -628,16 +606,20 @@ class GENEActiv:
             ax2.set_ylabel("G")
 
             if thresh_type == "absolute":
-                ax2.axhline(y=peak_thresh, color='green', linestyle='dashed', label="{} G".format(peak_thresh))
+                ax1.axhline(y=peak_thresh, color='green', linestyle='dashed', label="Thresh={} G".format(peak_thresh))
+                ax2.axhline(y=peak_thresh, color='green', linestyle='dashed', label="Thresh={} G".format(peak_thresh))
 
         else:
             fig, ax1 = plt.subplots(1, 1, figsize=(12, 7))
+
+            if thresh_type == "absolute":
+                ax1.axhline(y=peak_thresh, color='green', linestyle='dashed', label="Thresh={} G".format(peak_thresh))
 
             xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
             ax1.xaxis.set_major_formatter(xfmt)
             plt.xticks(rotation=45, fontsize=6)
 
-        plt.subplots_adjust(bottom=.25)
+        plt.subplots_adjust(bottom=.15)
 
         # HIP DATA -------------------------------------
         ax1.plot(hip_data["Timestamp"], hip_data[signal],
@@ -650,7 +632,7 @@ class GENEActiv:
         ax1.set_title("Signal={}, peak_thresh={}, "
                       "thresh_type={}, min_dist={} ms, downsample={}".format(signal, peak_thresh,
                                                                              thresh_type, min_peak_dist,
-                                                                             downsample_ratio))
+                                                                             downsample_factor))
 
         ax1.legend()
 
@@ -713,4 +695,5 @@ x.filter_signal2(type="bandpass", low_f=1, high_f=10, filter_order=3)
 #              peak_thresh=1.25, min_peak_dist=400, downsample_ratio=1)
 
 
-x.plot_peaks2(signal="X_filt", thresh_type="absolute", peak_thresh=1.25, min_peak_dist=400, downsample_ratio=1)
+x.plot_peaks(signal="X_filt", thresh_type="absolute", peak_thresh=1.15, min_peak_dist=400, downsample_factor=3,
+             start="2019-10-03 10:45:00", stop="2019-10-03 11:15:00")
