@@ -126,74 +126,13 @@ class GENEActiv:
 
         return df, sample_rate
 
-    def filter_signal(self, data_type=None, type="bandpass", low_f=1, high_f=10, sample_f=75, filter_order=1):
-        """Filtering details: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.filtfilt.html
-
-        Arguments:
-            -data_type: "hip" or "wrist"
-            -type: filter type - "bandpass", "lowpass", or "highpass"
-            -low_f: low-end cutoff frequency, required for lowpass and bandpass filters
-            -high_f: high-end cutoff frequency, required for highpass and bandpass filters
-            -sample_f: sample rate, Hz
-            -filter_order: integet for filter order
-
-        Adds columns to dataframe corresponding to "data_type" argument of filtered data
-        """
-
-        # Normalizes frequencies
-        nyquist_freq = 0.5 * sample_f
-
-        if data_type == "wrist" or data_type == "Wrist":
-            data = np.array([self.df_wrist["X"], self.df_wrist["Y"], self.df_wrist["Z"]])
-            original_df = self.df_wrist
-        if data_type == "hip" or data_type == "Hip":
-            data = np.array([self.df_hip["X"], self.df_hip["Y"], self.df_hip["Z"]])
-            original_df = self.df_hip
-        if data_type == "lankle" or data_type == "left ankle":
-            data = np.array([self.df_lankle["X"], self.df_lankle["Y"], self.df_lankle["Z"]])
-            original_df = self.df_lankle
-        if data_type == "rankle" or data_type == "right ankle":
-            data = np.array([self.df_rankle["X"], self.df_rankle["Y"], self.df_rankle["Z"]])
-            original_df = self.df_rankle
-
-        if type == "lowpass":
-            print("\nFiltering {} accelerometer data with {}Hz, order {} lowpass filter.".format(data_type,
-                                                                                                 low_f,
-                                                                                                 filter_order))
-            low = low_f / nyquist_freq
-            b, a = butter(N=filter_order, Wn=low, btype="lowpass")
-            filtered_data = filtfilt(b, a, x=data)
-
-        if type == "highpass":
-            print("\nFiltering {} accelerometer data with {}Hz, order {} highpass filter.".format(data_type,
-                                                                                                  high_f,
-                                                                                                  filter_order))
-            high = high_f / nyquist_freq
-            b, a = butter(N=filter_order, Wn=high, btype="highpass")
-            filtered_data = filtfilt(b, a, x=data)
-
-        if type == "bandpass":
-            print("\nFiltering {} accelerometer data with {}-{}Hz, order {} bandpass filter.".format(data_type,
-                                                                                                     low_f, high_f,
-                                                                                                     filter_order))
-
-            low = low_f / nyquist_freq
-            high = high_f / nyquist_freq
-            b, a = butter(N=filter_order, Wn=[low, high], btype="bandpass")
-            filtered_data = filtfilt(b, a, x=data)
-
-        original_df["X_filt"] = filtered_data[0]
-        original_df["Y_filt"] = filtered_data[1]
-        original_df["Z_filt"] = filtered_data[2]
-
-    def filter_signal2(self, type="bandpass", low_f=1, high_f=10, filter_order=1):
+    def filter_signal(self, type="bandpass", low_f=1, high_f=10, filter_order=1):
         """Filtering details: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.filtfilt.html
 
         Arguments:
             -type: filter type - "bandpass", "lowpass", or "highpass"
             -low_f: low-end cutoff frequency, required for lowpass and bandpass filters
             -high_f: high-end cutoff frequency, required for highpass and bandpass filters
-            -sample_f: sample rate, Hz
             -filter_order: integet for filter order
 
         Adds columns to dataframe corresponding to each device. Filters all devices that are available.
@@ -428,6 +367,10 @@ class GENEActiv:
             df = self.df_hip
         if data_type == "wrist" or data_type == "Wrist":
             df = self.df_wrist
+        if data_type == "lankle" or data_type == "Lankle" or data_type == "LAnkle":
+            df = self.df_lankle
+        if data_type == "rankle" or data_type == "Rankle" or data_type == "RAnkle":
+            df = self.df_rankle
 
         # Gets appropriate timestamps
         start, stop = self.get_timestamps(start, stop)
@@ -452,6 +395,16 @@ class GENEActiv:
                 print("\nDownsampling {}Hz data by a factor of {}. "
                       "New data is {}Hz.".format(self.hip_samplerate, downsample_factor,
                                                  round(self.hip_samplerate / downsample_factor, 1)))
+
+            if data_type == "lankle" or data_type == "Lankle" or data_type == "LAnkle":
+                print("\nDownsampling {}Hz data by a factor of {}. "
+                      "New data is {}Hz.".format(self.lankle_samplerate, downsample_factor,
+                                                 round(self.lankle_samplerate / downsample_factor, 1)))
+
+            if data_type == "rankle" or data_type == "Rankle" or data_type == "RAnkle":
+                print("\nDownsampling {}Hz data by a factor of {}. "
+                      "New data is {}Hz.".format(self.rankle_samplerate, downsample_factor,
+                                                 round(self.rankle_samplerate / downsample_factor, 1)))
 
         # Window length in minutes
         try:
@@ -505,13 +458,13 @@ class GENEActiv:
         if start is None and self.start_stamp is None:
             try:
                 start = self.df_hip["Timestamp"].iloc[0]
-            except (AttributeError, ValueError):
+            except (AttributeError, ValueError, TypeError):
                 start = self.df_wrist["Timestamp"].iloc[0]
 
         if stop is None and self.stop_stamp is None:
             try:
                 stop = self.df_hip["Timestamp"].iloc[-1]
-            except (AttributeError, ValueError):
+            except (AttributeError, ValueError, TypeError):
                 stop = self.df_wrist["Timestamp"].iloc[-1]
 
         # If arguments are not given and there are stamps from previous region
@@ -535,6 +488,8 @@ class GENEActiv:
             -peak_threshold: value to set threshold based on thresh_type. If thresh_type="normalized", peak_threshold
                              is a value from 0 to 1 that represents the threshold as a percent of the signal amplitude.
                              If thresh_type="absolute", the threshold can be any value that corresponds to G's
+                -Threshold is calculated as (max - min) * threshold + min
+
             -min_peak_dist: number of milliseconds required between consecutive peaks
             -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS"
             -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS"
@@ -670,16 +625,15 @@ class GENEActiv:
 
 
 # Creates data objects
-x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF",
-              wrist_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF",
-              leftankle_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF",
-              rightankle_filepath="/Users/kyleweber/Desktop/Data/OND07/EDF/Test_Ankle.EDF")
+x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
+              wrist_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
+              leftankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LAnkle.csv",
+              rightankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_RAnkle.csv")
 
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
 # Filtering
-x.filter_signal2(type="bandpass", low_f=1, high_f=10, filter_order=3)
-
+x.filter_signal(type="bandpass", low_f=1, high_f=10, filter_order=3)
 
 # Plots section of data between start and stop arguments. Formatted as YYYY-MM-DD HH:MM:SS
 # x.plot_data(start="2019-10-03 10:34:00", stop="2019-10-03 11:15:00", downsample_factor=1) # Section of data
@@ -691,9 +645,6 @@ x.filter_signal2(type="bandpass", low_f=1, high_f=10, filter_order=3)
 
 # Clearing data cropping 'memory'
 # x.start_stamp, x.stop_stamp = None, None
-# x.plot_peaks(data_type="Hip", signal="X_filt", thresh_type="absolute",
-#              peak_thresh=1.25, min_peak_dist=400, downsample_ratio=1)
 
-
-x.plot_peaks(signal="X_filt", thresh_type="absolute", peak_thresh=1.15, min_peak_dist=400, downsample_factor=3,
-             start="2019-10-03 10:45:00", stop="2019-10-03 11:15:00")
+# Plots available hip/ankle data with peaks
+# x.plot_peaks(signal="X_filt", thresh_type="normalized", peak_thresh=.7, min_peak_dist=400, downsample_factor=1)
