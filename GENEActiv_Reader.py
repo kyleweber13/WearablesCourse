@@ -843,7 +843,7 @@ class GENEActiv:
                                                       datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
 
-os.chdir("/Users/kyleweber/Desktop/")
+# os.chdir("/Users/kyleweber/Desktop/")
 
 # Creates data object
 x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
