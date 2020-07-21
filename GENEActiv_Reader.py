@@ -1,16 +1,19 @@
-import pyedflib
-import numpy as np
-import pandas as pd
-from datetime import datetime
+import pyedflib # wavelet toolbox for reading / writing EDF/BDF files  
+import numpy as np ## package for scientific computing 
+import pandas as pd # package for data analysis and manipulation tools 
+from datetime import datetime # module supplying classes for manipulating dates and times
 from datetime import timedelta
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # library for creating static, animated, and interactive visualizations
 import matplotlib.dates as mdates
-import os
-from scipy.signal import butter, filtfilt
-import peakutils
+import os # module allowing code to use operating system dependent functionality
+from scipy.signal import butter, filtfilt # signal processing toolbox
+import peakutils # package for utilities related to the detection of peaks on 2D data
 
 
 class GENEActiv:
+    
+    #### Block 2A ####
+    ### This block defines our method(s) for loading our accelerometer files ###
 
     def __init__(self, wrist_filepath=None, hip_filepath=None, leftankle_filepath=None, rightankle_filepath=None,
                  fig_height=7, fig_width=12):
@@ -140,6 +143,9 @@ class GENEActiv:
 
         return df, sample_rate
 
+    #### Block 2B ####
+    ### This block defines our method(s) for epoching our data to calculate activity counts ###
+    
     def epoch_data(self, epoch_length=15):
         """Creates df of epoched data for all available devices. Able to set epoch_length in seconds."""
 
@@ -198,6 +204,9 @@ class GENEActiv:
 
         return df
 
+    #### Block 2C ###
+    ### This block defines our method(s) for filtering data ###
+    
     def filter_signal(self, type="bandpass", low_f=1, high_f=10, filter_order=1):
         """Filtering details: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.filtfilt.html
 
@@ -264,6 +273,9 @@ class GENEActiv:
             original_df["Y_filt"] = filtered_data[1]
             original_df["Z_filt"] = filtered_data[2]
 
+    #### Block 2D ####
+    ### This block defines our method(s) for plotting data ###
+    
     def plot_data(self, start=None, stop=None, downsample_factor=1):
         """Plots hip and wrist data whichever/both is available.
 
@@ -442,6 +454,9 @@ class GENEActiv:
         print("Plot saved as png (HipWrist_{} to {}.png)".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                                  datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
+    #### Block 2E ####
+    ### This block defines our method(s) for comparing filtered to unfiltered data ###
+    
     def compare_filter(self, start=None, stop=None, data_type=None, downsample_factor=1):
         """Plots raw and filtered data on separate subplots.
 
@@ -559,6 +574,9 @@ class GENEActiv:
                                                                           datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                                           datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
+    #### Block 2F ####
+    ### This block defines our method(s) for identifying timestamps ### 
+    
     def get_timestamps(self, start=None, stop=None):
 
         # If start/stop given as integer, sets start/stop stamps to minutes into collection ---------------------------
@@ -611,6 +629,9 @@ class GENEActiv:
 
         return start, stop, data_type
 
+    #### Block 2G ####
+    ### This block defines our method(s) for basic peak detection using thresholding ### 
+    
     def plot_peaks(self, signal="X", thresh_type="normalized",
                    peak_thresh=0.5, min_peak_dist=500, downsample_factor=1,
                    start=None, stop=None):
@@ -785,6 +806,9 @@ class GENEActiv:
               "(StepPeakDetection_{} to {}.png)".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                         datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
+    #### Block 2H ####
+    ### This block defines our method(s) for plotting epoched data (activity counts) ###
+    
     def plot_epoched(self, start=None, stop=None):
         """Plots epoched data for all available devices.
 
@@ -849,6 +873,9 @@ class GENEActiv:
         plt.savefig("EpochedData_{} to {}.png".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                       datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
+    #### Block 2I ####
+    ### This block defines oiur method(s) for creating CSV files of our activity counts ###
+    
     def write_epoched_csv(self):
 
         print("\nWriting epoched data to csv file 'Epoched_ActivityCounts.csv'")
