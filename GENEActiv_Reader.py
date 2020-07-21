@@ -192,7 +192,8 @@ class GENEActiv:
 
         print("Epoching complete.")
 
-        print("Epoched data device Pearson correlation matrix:")
+        print("\nEpoched data device Pearson correlation matrix:")
+
         print(df.corr())
 
         return df
@@ -333,7 +334,7 @@ class GENEActiv:
             window_len = (datetime.strptime(stop, "%Y-%m-%d %H:%M:%S") -
                           datetime.strptime(start, "%Y-%m-%d %H:%M:%S")).seconds / 60
 
-        print("Plotting {} minute section from {} to {}.".format(window_len, start, stop))
+        print("Plotting {} minute section from {} to {}.".format(round(window_len, 1), start, stop))
 
         # Downsampling information ------------------------------------------------------------------------------------
         if downsample_factor != 1:
@@ -666,6 +667,8 @@ class GENEActiv:
                                           thres=peak_thresh,
                                           min_dist=int(min_peak_dist / downsample_factor / (1000 / hip_fs)))
 
+            print("-Hip accelerometer: found {} steps.".format(len(hip_peaks)))
+
             if data_type == "absolute":
                 hip_data["Timestamp"] = np.arange(0, (stop - start).seconds,
                                                   1 / self.hip_samplerate)[0:hip_data.shape[0]]
@@ -680,6 +683,8 @@ class GENEActiv:
                                          thres=peak_thresh,
                                          min_dist=int(min_peak_dist / downsample_factor / (1000 / la_fs)))
 
+            print("-Left ankle accelerometer: found {} steps.".format(len(la_peaks)))
+
             if data_type == "absolute":
                 la_data["Timestamp"] = np.arange(0, (stop - start).seconds, 1 / self.hip_samplerate)[0:la_data.shape[0]]
 
@@ -692,6 +697,8 @@ class GENEActiv:
                                          thres_abs=True if thresh_type == "absolute" else False,
                                          thres=peak_thresh,
                                          min_dist=int(min_peak_dist / downsample_factor / (1000 / ra_fs)))
+
+            print("-Right ankle accelerometer: found {} steps.".format(len(ra_peaks)))
 
             if data_type == "absolute":
                 ra_data["Timestamp"] = np.arange(0, (stop - start).seconds, 1 / self.hip_samplerate)[0:ra_data.shape[0]]
@@ -772,11 +779,11 @@ class GENEActiv:
             if data_type == "absolute":
                 ax2.set_xlabel("Seconds into collection")
 
-
         plt.savefig("StepPeakDetection_{} to {}.png".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                             datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
-        print("Plot saved as png (StepPeakDetection_{} to {}.png)".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
-                                                                          datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+        print("\nPlot saved as png "
+              "(StepPeakDetection_{} to {}.png)".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
+                                                        datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
     def plot_epoched(self, start=None, stop=None):
         """Plots epoched data for all available devices.
@@ -842,8 +849,13 @@ class GENEActiv:
         plt.savefig("EpochedData_{} to {}.png".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                       datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
+    def write_epoched_csv(self):
 
-# os.chdir("/Users/kyleweber/Desktop/")
+        print("\nWriting epoched data to csv file 'Epoched_ActivityCounts.csv'")
+        self.df_epoched.to_csv("Epoched_ActivityCounts.csv", index=False)
+        self.df_epoched.to_csv("Epoched_ActivityCounts.csv", index=False)
+        print("Complete.")
+
 
 # Creates data object
 x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
@@ -872,15 +884,10 @@ x.df_epoched = x.epoch_data(epoch_length=15)
 # x.start_stamp, x.stop_stamp = None, None
 
 # Plots available hip/ankle data with peaks
-# x.plot_peaks(signal="X_filt", thresh_type="normalized", peak_thresh=.7, min_peak_dist=400, downsample_factor=1,
-#             start=5, stop=15)
+# x.plot_peaks(signal="X_filt", thresh_type="normalized", peak_thresh=.7, min_peak_dist=400, downsample_factor=1, start=5, stop=15)
 
 # Plots epoched data and saves png
 # x.plot_epoched()
 
-# ====================================================== UPDATED ======================================================
-# class: added fig_height and fig_width arguments
-# Plot colours
-# Automatically saving plots as png with file naming that includes plot type and timestamps of data
-# Data epoching: calculates activity counts over specified epoch length, prints correlation matrix between devices
-# Plotting epoched data
+# Writes epoched counts to csv file
+# x.write_epoched_csv()
