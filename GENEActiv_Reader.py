@@ -866,8 +866,10 @@ class GENEActiv:
         self.df_epoched.to_csv("Epoched_ActivityCounts.csv", index=False)
         print("Complete.")
 
+# ==================================================== BLOCK 3 =====================================================
+# This block identifies the files of interest and creates corresponding data objects
+"""Change the filepath(s) to the file(s) of interest (e.g. x = GENEActiv(hip_filepath=*"Test_Body.EDF"*)"""
 
-# Creates data object
 x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
               wrist_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
               leftankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LAnkle.csv",
@@ -876,28 +878,64 @@ x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
 
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
-# Filtering
+# ==================================================== BLOCK 4 =====================================================
+# This block applies filtering to signals read from the data files ###
+# Run this block if filtering of data is required ###
+"""If applicable, change filtering arguments type, low_f, high_f, sample_f, and filter_order"""
+
 x.filter_signal(type="bandpass", low_f=1, high_f=10, filter_order=3)
 
-# Data epoching (activity counts)
+# ==================================================== BLOCK 5 =====================================================
+# This block epochs the signals read from the data files to calculate activity counts ###
+# Run this block if activity counts are required ###
+# This will print out a Pearson correlation matrix for each body segment ###
+"""If applicable, change epoching argument epoch_length"""
+
 x.df_epoched = x.epoch_data(epoch_length=15)
 
-# Plots section of data between start and stop arguments. Formatted as YYYY-MM-DD HH:MM:SS
+# ==================================================== BLOCK 6A =====================================================
+# This block plots the entire dataset (or if applicable, data within a window based on timestamps) ###
+# Run this block if data plotting is required ###
+# This will plot data and also generate a .PNG file ###
+"""Remove # from line 1 if using specific timestamps (formatted as YYYY-MM-DD HH:MM:SS)"""
+"""If applicable, change time argument start, stop; downsample_factor will decrease # of samples"""
+
 # x.plot_data(start="2019-10-03 10:34:00", stop="2019-10-03 11:15:00", downsample_factor=1) # Section of data
-# x.plot_data(start=15, stop=20, downsample_factor=1)  # Plots whole file OR plots region previously specified
+x.plot_data(start=15, stop=20, downsample_factor=1)  # Plots whole file OR plots region previously specified
 
-# Plots raw and filtered data on separate subplots
-# x.compare_filter(start="2019-10-03 10:34:00", stop="2019-10-03 10:59:00", data_type="hip")
-# x.compare_filter(data_type="lankle", downsample_factor=1)
-
-# Clearing data cropping 'memory'
+# ==================================================== BLOCK 6B =====================================================
+# This block clearing data cropping 'memory'by resetting the timestamps ###
+"""Remove # from line 1 to apply"""
 # x.start_stamp, x.stop_stamp = None, None
 
-# Plots available hip/ankle data with peaks
+# ==================================================== BLOCK 7 =====================================================
+# This block creates seprate subplots for filtered vs. unfiltered data based on timestamps specified in Block 6A ###
+# Run this block if comparing filtered vs. unfiltered data in plot form is required ###
+# This will plot data and also generate a .PNG file ###
+"""Remove # from line 1 if applying block of code"""
+"""If applicable, change time argument start, stop; downsample_factor will decrease # of samples"""
+
+# x.compare_filter(data_type="lankle", downsample_factor=1)
+
+# ==================================================== BLOCK 8 =====================================================
+# This block creates plots with peaks identified based on parameters specified in Block 2E ###
+# Run this block if plots with peaks detected is required ###
+# This will plot data and also generate a .PNG file ###
+"""Remove # from line 1 if applying block of code"""
+"""If applicable, change peak_thresh argument"""
+
 # x.plot_peaks(signal="X_filt", thresh_type="normalized", peak_thresh=.7, min_peak_dist=400, downsample_factor=1, start=5, stop=15)
 
-# Plots epoched data and saves png
+# ==================================================== BLOCK 8 =====================================================
+# This block creates plots for epoched data ###
+# Run this block if activity count plot is required ###
+# This will plot data and also generate a .PNG file ###
+"""Remove # from line 1 if applying block of code"""
 # x.plot_epoched()
 
-# Writes epoched counts to csv file
+# ==================================================== BLOCK 9 =====================================================
+# This block creates a delimited spreadsheet file for epoched data ###
+# Run this block if a new spreadsheet is required ###
+# This will generate a .CSV file ###
+"""Remove # from line 1 if applying block of code"""
 # x.write_epoched_csv()
