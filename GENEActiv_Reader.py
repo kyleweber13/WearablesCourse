@@ -1,21 +1,23 @@
-import pyedflib
-import numpy as np
-import pandas as pd
-from datetime import datetime
+import pyedflib  # wavelet toolbox for reading / writing EDF/BDF files
+import numpy as np  ## package for scientific computing
+import pandas as pd  # package for data analysis and manipulation tools
+from datetime import datetime  # module supplying classes for manipulating dates and times
 from datetime import timedelta
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # library for creating static, animated, and interactive visualizations
 import matplotlib.dates as mdates
-import os
-from scipy.signal import butter, filtfilt
-import peakutils
+import os  # module allowing code to use operating system dependent functionality
+from scipy.signal import butter, filtfilt  # signal processing toolbox
+import peakutils  # package for utilities related to the detection of peaks on 2D data
 
 
 class GENEActiv:
 
+    # ==================================================== BLOCK 2A ===================================================
+    # This block defines our method(s) for loading our accelerometer files
+
     def __init__(self, wrist_filepath=None, hip_filepath=None, leftankle_filepath=None, rightankle_filepath=None,
                  fig_height=7, fig_width=12):
         """Class that reads in GENEActiv data (EDF). Data is read in and no further methods are called.
-
             :arguments:
             -wrist_filepath, hip_filepath, leftankle_filepath, rightright_filepath: full pathway to all .edf files
              to read in. Default value is None; fill will not be read in if no argument given
@@ -140,6 +142,9 @@ class GENEActiv:
 
         return df, sample_rate
 
+    # ==================================================== BLOCK 2B ===================================================
+    # This block defines our method(s) for epoching our data to calculate activity counts
+
     def epoch_data(self, epoch_length=15):
         """Creates df of epoched data for all available devices. Able to set epoch_length in seconds."""
 
@@ -184,7 +189,6 @@ class GENEActiv:
 
         df = pd.DataFrame(svm_lists).transpose()
 
-        # epoch_stamps = timestamps.iloc[::int(fs * epoch_length)]
         epoch_stamps = [timestamps.iloc[0] + timedelta(seconds=15) * i for i in range(0, df.shape[0])]
 
         df.insert(loc=0, column="Timestamp", value=epoch_stamps)
@@ -198,15 +202,16 @@ class GENEActiv:
 
         return df
 
+    # ==================================================== BLOCK 2C ===================================================
+    # This block defines our method(s) for filtering data
+
     def filter_signal(self, type="bandpass", low_f=1, high_f=10, filter_order=1):
         """Filtering details: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.filtfilt.html
-
         Arguments:
             -type: filter type - "bandpass", "lowpass", or "highpass"
             -low_f: low-end cutoff frequency, required for lowpass and bandpass filters
             -high_f: high-end cutoff frequency, required for highpass and bandpass filters
             -filter_order: integet for filter order
-
         Adds columns to dataframe corresponding to each device. Filters all devices that are available.
         """
 
@@ -264,20 +269,20 @@ class GENEActiv:
             original_df["Y_filt"] = filtered_data[1]
             original_df["Z_filt"] = filtered_data[2]
 
+    # ==================================================== BLOCK 2D ===================================================
+    # This block defines our method(s) for plotting data
+
     def plot_data(self, start=None, stop=None, downsample_factor=1):
         """Plots hip and wrist data whichever/both is available.
-
             arguments:
                 -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS" OR integer for
                         minutes into collection
                 -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS" OR integer for
                         minutes into collection
                 -downsample: ratio by which data are downsampled. E.g. downsample=3 will downsample from 75 to 25 Hz
-
             If start and stop are not specified, data will be cropped to one of the following:
                 -If no previous graphs have been generated, it will plot the entire data file
                 -If a previous crop has occurred, it will 'remember' that region and plot it again.
-
             To clear the 'memory' of previously-plotted regions, enter "x.start_stamp=None"
             and "x.stop_stop=None" in console
         """
@@ -380,7 +385,7 @@ class GENEActiv:
 
                     ax2.xaxis.set_major_formatter(xfmt)
                     ax2.xaxis.set_major_locator(locator)
-                    plt.xticks(rotation=45, fontsize=6)
+                    plt.xticks(rotation=45, fontsize=8)
 
                 if data_type == "absolute":
                     ax2.set_xlabel("Seconds into collection")
@@ -406,7 +411,7 @@ class GENEActiv:
                 if data_type == "timestamp":
                     ax1.xaxis.set_major_formatter(xfmt)
                     ax1.xaxis.set_major_locator(locator)
-                    plt.xticks(rotation=45, fontsize=6)
+                    plt.xticks(rotation=45, fontsize=8)
 
                 if data_type == "absolute":
                     ax1.set_xlabel("Seconds into collection")
@@ -430,7 +435,7 @@ class GENEActiv:
                 if data_type == "timestamp":
                     ax1.xaxis.set_major_formatter(xfmt)
                     ax1.xaxis.set_major_locator(locator)
-                    plt.xticks(rotation=45, fontsize=6)
+                    plt.xticks(rotation=45, fontsize=8)
 
                 if data_type == "absolute":
                     ax1.set_xlabel("Seconds into collection")
@@ -442,18 +447,18 @@ class GENEActiv:
         print("Plot saved as png (HipWrist_{} to {}.png)".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                                  datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
+    # ==================================================== BLOCK 2E ===================================================
+    # This block defines our method(s) for comparing filtered to unfiltered data
+
     def compare_filter(self, start=None, stop=None, data_type=None, downsample_factor=1):
         """Plots raw and filtered data on separate subplots.
-
         arguments:
             -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS"
             -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS"
             -downsample_factor: ratio by which data are downsampled. E.g. downsample=3 will downsample from 75 to 25 Hz
-
         If start and stop are not specified, data will be cropped to one of the following:
             -If no previous graphs have been generated, it will plot the entire data file
             -If a previous crop has occurred, it will 'remember' that region and plot it again.
-
         To clear the 'memory' of previously-plotted regions, enter "x.start_stamp=None"
         and "x.stop_stop=None" in console
         """
@@ -550,7 +555,7 @@ class GENEActiv:
         if data_type == "absolute":
             ax2.set_xlabel("Seconds into collection")
 
-        plt.xticks(rotation=45, fontsize=6)
+        plt.xticks(rotation=45, fontsize=8)
 
         plt.savefig("{}_RawAndFiltered_{} to {}.png".format(data_type.capitalize(),
                                                             datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
@@ -558,6 +563,9 @@ class GENEActiv:
         print("Plot saved as png ({}_RawAndFiltered_{} to {}.png)".format(data_type.capitalize(),
                                                                           datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                                           datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+
+    # ==================================================== BLOCK 2F ===================================================
+    # This block defines our method(s) for identifying timestamps (previously used ones to replot same data regions)
 
     def get_timestamps(self, start=None, stop=None):
 
@@ -611,11 +619,13 @@ class GENEActiv:
 
         return start, stop, data_type
 
+    # ==================================================== BLOCK 2G ===================================================
+    # This block defines our method(s) for basic peak detection using thresholding
+
     def plot_peaks(self, signal="X", thresh_type="normalized",
                    peak_thresh=0.5, min_peak_dist=500, downsample_factor=1,
                    start=None, stop=None):
         """"Function that runs peakutils to detect peaks in accelerometer data and plots results.
-
             :argument
             -signal: what data to run the peak detection on. Must be a column name contained within df_wrist or df_hip
                 -Options: "X", "Y", "Z", "Mag", "X_filt", "Y_filt", "Z_filt"
@@ -624,16 +634,13 @@ class GENEActiv:
                              is a value from 0 to 1 that represents the threshold as a percent of the signal amplitude.
                              If thresh_type="absolute", the threshold can be any value that corresponds to G's
                 -Threshold is calculated as (max - min) * threshold + min
-
             -min_peak_dist: number of milliseconds required between consecutive peaks
             -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS"
             -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS"
             -downsample_factor: ratio by which data are downsampled. E.g. downsample=3 will downsample from 75 to 25 Hz
-
         If start and stop are not specified, data will be cropped to one of the following:
         -If no previous graphs have been generated, it will plot the entire data file
         -If a previous crop has occurred, it will 'remember' that region and plot it again.
-
         To clear the 'memory' of previously-plotted regions, enter "x.start_stamp=None"
         and "x.stop_stop=None" in console
         """
@@ -723,7 +730,7 @@ class GENEActiv:
 
             xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
             ax1.xaxis.set_major_formatter(xfmt)
-            plt.xticks(rotation=45, fontsize=6)
+            plt.xticks(rotation=45, fontsize=8)
 
         plt.subplots_adjust(bottom=.15)
 
@@ -746,7 +753,7 @@ class GENEActiv:
         if self.lankle_fname is None and self.rankle_fname is None:
             xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
             ax1.xaxis.set_major_formatter(xfmt)
-            plt.xticks(rotation=45, fontsize=6)
+            plt.xticks(rotation=45, fontsize=8)
 
         # ANKLE DATA ------------------------------------
         if self.lankle_fname is not None and self.rankle_fname is not None:
@@ -774,7 +781,7 @@ class GENEActiv:
             if data_type == "timestamp":
                 xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
                 ax2.xaxis.set_major_formatter(xfmt)
-                plt.xticks(rotation=45, fontsize=6)
+                plt.xticks(rotation=45, fontsize=8)
 
             if data_type == "absolute":
                 ax2.set_xlabel("Seconds into collection")
@@ -785,17 +792,17 @@ class GENEActiv:
               "(StepPeakDetection_{} to {}.png)".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                         datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
+    # ==================================================== BLOCK 2H ===================================================
+    # This block defines our method(s) for plotting epoched data (activity counts)
+
     def plot_epoched(self, start=None, stop=None):
         """Plots epoched data for all available devices.
-
             :arguments
             -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS"
             -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS"
-
         If start and stop are not specified, data will be cropped to one of the following:
             -If no previous graphs have been generated, it will plot the entire data file
             -If a previous crop has occurred, it will 'remember' that region and plot it again.
-
         To clear the 'memory' of previously-plotted regions, enter "x.start_stamp=None"
         and "x.stop_stop=None" in console
         """
@@ -844,10 +851,13 @@ class GENEActiv:
 
         ax1.xaxis.set_major_formatter(xfmt)
         ax1.xaxis.set_major_locator(locator)
-        plt.xticks(rotation=45, fontsize=6)
+        plt.xticks(rotation=45, fontsize=8)
 
         plt.savefig("EpochedData_{} to {}.png".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                       datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+
+    # ==================================================== BLOCK 2I ===================================================
+    # This block defines our method(s) for creating CSV files of our activity counts ###
 
     def write_epoched_csv(self):
 
