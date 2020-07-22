@@ -290,26 +290,26 @@ class GENEActiv:
         print("\n-----------------------------------------------------------------------------------------------------")
 
         # Gets appropriate timestamps
-        start, stop, data_type = self.get_timestamps(start, stop)
+        start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
 
-        self.start_stamp = start
-        self.stop_stamp = stop
+        self.start_stamp = start_stamp
+        self.stop_stamp = stop_stamp
 
         # Crops dataframes to selected region -------------------------------------------------------------------------
         if self.hip_fname is not None:
             # Sets stop to end of collection if stop timestamp exceeds timestamp range
             try:
-                if stop > self.df_hip.iloc[-1]["Timestamp"]:
-                    stop = self.df_hip.iloc[-1]["Timestamp"]
+                if stop_stamp > self.df_hip.iloc[-1]["Timestamp"]:
+                    stop_stamp = self.df_hip.iloc[-1]["Timestamp"]
             except TypeError:
-                if datetime.strptime(stop, "%Y-%m-%d %H:%M:%S") > self.df_hip.iloc[-1]["Timestamp"]:
-                    stop = self.df_hip.iloc[-1]["Timestamp"]
+                if datetime.strptime(stop_stamp, "%Y-%m-%d %H:%M:%S") > self.df_hip.iloc[-1]["Timestamp"]:
+                    stop_stamp = self.df_hip.iloc[-1]["Timestamp"]
 
-            df_hip = self.df_hip.loc[(self.df_hip["Timestamp"] > start) & (self.df_hip["Timestamp"] < stop)]
+            df_hip = self.df_hip.loc[(self.df_hip["Timestamp"] > start_stamp) & (self.df_hip["Timestamp"] < stop_stamp)]
 
             if data_type == "absolute":
-                # df_hip["Timestamp"] = [i / 60 / self.hip_samplerate for i in range(0, stop - start)]
-                df_hip["Timestamp"] = np.arange(0, (stop - start).seconds, 1 / self.hip_samplerate)[0:df_hip.shape[0]]
+                df_hip["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
+                                                1 / self.hip_samplerate)[0:df_hip.shape[0]]
 
             if downsample_factor != 1:
                 df_hip = df_hip.iloc[::downsample_factor, :]
@@ -317,29 +317,26 @@ class GENEActiv:
         if self.wrist_fname is not None:
             # Sets stop to end of collection if stop timestamp exceeds timestamp range
             try:
-                if stop > self.df_wrist.iloc[-1]["Timestamp"]:
-                    stop = self.df_wrist.iloc[-1]["Timestamp"]
+                if stop_stamp > self.df_wrist.iloc[-1]["Timestamp"]:
+                    stop_stamp = self.df_wrist.iloc[-1]["Timestamp"]
             except TypeError:
-                if datetime.strptime(stop, "%Y-%m-%d %H:%M:%S") > self.df_wrist.iloc[-1]["Timestamp"]:
-                    stop = self.df_wrist.iloc[-1]["Timestamp"]
+                if datetime.strptime(stop_stamp, "%Y-%m-%d %H:%M:%S") > self.df_wrist.iloc[-1]["Timestamp"]:
+                    stop_stamp = self.df_wrist.iloc[-1]["Timestamp"]
 
-            df_wrist = self.df_wrist.loc[(self.df_wrist["Timestamp"] > start) & (self.df_wrist["Timestamp"] < stop)]
+            df_wrist = self.df_wrist.loc[(self.df_wrist["Timestamp"] > start_stamp) &
+                                         (self.df_wrist["Timestamp"] < stop_stamp)]
 
             if data_type == "absolute":
-                df_wrist["Timestamp"] = np.arange(0, (stop - start).seconds,
+                df_wrist["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
                                                   1 / self.wrist_samplerate)[0:df_wrist.shape[0]]
 
             if downsample_factor != 1:
                 df_wrist = df_wrist.iloc[::downsample_factor, :]
 
         # Window length in minutes
-        try:
-            window_len = (stop - start).seconds / 60
-        except TypeError:
-            window_len = (datetime.strptime(stop, "%Y-%m-%d %H:%M:%S") -
-                          datetime.strptime(start, "%Y-%m-%d %H:%M:%S")).seconds / 60
+        window_len = (stop_stamp - start_stamp).seconds / 60
 
-        print("Plotting {} minute section from {} to {}.".format(round(window_len, 1), start, stop))
+        print("Plotting {} minute section from {} to {}.".format(round(window_len, 1), start_stamp, stop_stamp))
 
         # Downsampling information ------------------------------------------------------------------------------------
         if downsample_factor != 1:
@@ -442,10 +439,10 @@ class GENEActiv:
 
             plot_hip()
 
-        plt.savefig("HipWrist_{} to {}.png".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
-                                                   datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
-        print("Plot saved as png (HipWrist_{} to {}.png)".format(datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
-                                                                 datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+        plt.savefig("HipWrist_{} to {}.png".format(datetime.strftime(start_stamp, "%Y-%m-%d %H_%M_%S"),
+                                                   datetime.strftime(stop_stamp, "%Y-%m-%d %H_%M_%S")))
+        print("Plot saved as png (HipWrist_{} to {}.png)".format(datetime.strftime(start_stamp, "%Y-%m-%d %H_%M_%S"),
+                                                                 datetime.strftime(stop_stamp, "%Y-%m-%d %H_%M_%S")))
 
     # ==================================================== BLOCK 2E ===================================================
     # This block defines our method(s) for comparing filtered to unfiltered data
@@ -575,14 +572,14 @@ class GENEActiv:
             data_type = "absolute"
 
             try:
-                start = self.df_hip["Timestamp"].iloc[0] + timedelta(minutes=start)
+                start_stamp = self.df_hip["Timestamp"].iloc[0] + timedelta(minutes=start)
             except (AttributeError, ValueError, TypeError):
-                start = self.df_wrist["Timestamp"].iloc[0] + timedelta(minutes=start)
+                start_stamp = self.df_wrist["Timestamp"].iloc[0] + timedelta(minutes=start)
 
             try:
-                stop = self.df_hip["Timestamp"].iloc[0] + timedelta(minutes=stop)
+                stop_stamp = self.df_hip["Timestamp"].iloc[0] + timedelta(minutes=stop)
             except (AttributeError, ValueError, TypeError):
-                stop = self.df_wrist["Timestamp"].iloc[0] + timedelta(minutes=stop)
+                stop_stamp = self.df_wrist["Timestamp"].iloc[0] + timedelta(minutes=stop)
 
         # Formats arguments as datetimes -----------------------------------------------------------------------------
 
@@ -592,32 +589,37 @@ class GENEActiv:
             data_type = "timestamp"
 
             if start is not None and self.start_stamp is None:
-                start = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+                start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
             if stop is not None and self.stop_stamp is None:
-                stop = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
+                stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
 
             # If arguments not given and no stamps from previous region
             # Sets start/stop to first/last timestamp for hip or wrist data
             if start is None and self.start_stamp is None:
                 try:
-                    start = self.df_hip["Timestamp"].iloc[0]
+                    start_stamp = self.df_hip["Timestamp"].iloc[0]
                 except (AttributeError, ValueError, TypeError):
-                    start = self.df_wrist["Timestamp"].iloc[0]
-
+                    start_stamp = self.df_wrist["Timestamp"].iloc[0]
             if stop is None and self.stop_stamp is None:
                 try:
-                    stop = self.df_hip["Timestamp"].iloc[-1]
+                    stop_stamp = self.df_hip["Timestamp"].iloc[-1]
                 except (AttributeError, ValueError, TypeError):
-                    stop = self.df_wrist["Timestamp"].iloc[-1]
+                    stop_stamp = self.df_wrist["Timestamp"].iloc[-1]
 
             # If arguments are not given and there are stamps from previous region
             if start is None and self.start_stamp is not None:
                 print("Plotting previously-plotted region.")
-                start = self.start_stamp
+                start_stamp = self.start_stamp
             if stop is None and self.stop_stamp is not None:
-                stop = self.stop_stamp
+                stop_stamp = self.stop_stamp
 
-        return start, stop, data_type
+            # If arguments given --> overrides stamps from previous region
+            if start is not None and self.start_stamp is not None:
+                start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+            if stop is not None and self.stop_stamp is not None:
+                stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
+
+        return start_stamp, stop_stamp, data_type
 
     # ==================================================== BLOCK 2G ===================================================
     # This block defines our method(s) for basic peak detection using thresholding
@@ -847,7 +849,7 @@ class GENEActiv:
         xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
 
         # Generates ~15 ticks (1/15th of window length apart)
-        locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
+        locator = mdates.MinuteLocator(byminute=np.arange(0, 60, int(np.ceil(window_len / 15))), interval=1)
 
         ax1.xaxis.set_major_formatter(xfmt)
         ax1.xaxis.set_major_locator(locator)
@@ -865,6 +867,7 @@ class GENEActiv:
         self.df_epoched.to_csv("Epoched_ActivityCounts.csv", index=False)
         self.df_epoched.to_csv("Epoched_ActivityCounts.csv", index=False)
         print("Complete.")
+
 
 # ==================================================== BLOCK 3 =====================================================
 # This block identifies the files of interest and creates corresponding data objects
@@ -900,8 +903,8 @@ x.df_epoched = x.epoch_data(epoch_length=15)
 """Remove # from line 1 if using specific timestamps (formatted as YYYY-MM-DD HH:MM:SS)"""
 """If applicable, change time argument start, stop; downsample_factor will decrease # of samples"""
 
-# x.plot_data(start="2019-10-03 10:34:00", stop="2019-10-03 11:15:00", downsample_factor=1) # Section of data
-x.plot_data(start=15, stop=20, downsample_factor=1)  # Plots whole file OR plots region previously specified
+x.plot_data(start="2018-07-03 13:15:00", stop="2018-07-03 13:35:00", downsample_factor=1)  # Section of data
+# x.plot_data(start=15, stop=20, downsample_factor=1)  # Plots whole file OR plots region previously specified
 
 # ==================================================== BLOCK 6B =====================================================
 # This block clearing data cropping 'memory'by resetting the timestamps ###
@@ -931,7 +934,7 @@ x.plot_data(start=15, stop=20, downsample_factor=1)  # Plots whole file OR plots
 # Run this block if activity count plot is required ###
 # This will plot data and also generate a .PNG file ###
 """Remove # from line 1 if applying block of code"""
-# x.plot_epoched()
+x.plot_epoched()
 
 # ==================================================== BLOCK 9 =====================================================
 # This block creates a delimited spreadsheet file for epoched data ###
