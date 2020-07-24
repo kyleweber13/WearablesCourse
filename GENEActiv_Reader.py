@@ -16,7 +16,7 @@ class GENEActiv:
     # This block defines our method(s) for loading our accelerometer files
 
     def __init__(self, wrist_filepath=None, hip_filepath=None, leftankle_filepath=None, rightankle_filepath=None,
-                 fig_height=7, fig_width=12):
+                 ecg_filepath=None, fig_height=7, fig_width=12):
         """Class that reads in GENEActiv data (EDF). Data is read in and no further methods are called.
             :arguments:
             -wrist_filepath, hip_filepath, leftankle_filepath, rightright_filepath: full pathway to all .edf files
@@ -28,9 +28,15 @@ class GENEActiv:
         self.hip_fname = hip_filepath
         self.lankle_fname = leftankle_filepath
         self.rankle_fname = rightankle_filepath
+        self.ecg_fname = ecg_filepath
 
         self.fig_height = fig_height
         self.fig_width = fig_width
+
+        self.accel_filter_low_f = None
+        self.accel_filter_low_h = None
+        self.ecg_filter_freq_l = None
+        self.ecg_filter_freq_h = None
 
         self.df_wrist, self.wrist_samplerate = self.load_correct_file(filepath=self.wrist_fname, f_type="Wrist")
         self.df_hip, self.hip_samplerate = self.load_correct_file(filepath=self.hip_fname, f_type="Hip")
@@ -38,6 +44,7 @@ class GENEActiv:
                                                                         f_type="Left ankle")
         self.df_rankle, self.rankle_samplerate = self.load_correct_file(filepath=self.rankle_fname,
                                                                         f_type="Right ankle")
+        self.df_ecg, self.ecg_samplerate = self.import_edf(filepath=self.ecg_fname, f_type="ECG")
 
         self.df_epoched = None
 
@@ -67,7 +74,7 @@ class GENEActiv:
 
         t0 = datetime.now()
 
-        if filepath is not None:
+        if filepath is not None and f_type != "ECG":
             print("------------------------------------- {} data -------------------------------------".format(f_type))
             print("\nImporting {}...".format(filepath))
 
@@ -94,6 +101,36 @@ class GENEActiv:
 
             print("\nAssembling data...")
             df = pd.DataFrame(list(zip(timestamps, x, y, z, vecmag)), columns=["Timestamp", "X", "Y", "Z", "Mag"])
+            print("Dataframe created.")
+
+            t1 = datetime.now()
+            proc_time = (t1 - t0).seconds
+            print("Import complete ({} seconds).".format(round(proc_time, 2)))
+
+            return df, sample_rate
+
+        if filepath is not None and f_type == "ECG":
+            print("------------------------------------- {} data -------------------------------------".format(f_type))
+            print("\nImporting {}...".format(filepath))
+
+            # READS IN EG DATA ========================================================================================
+            file = pyedflib.EdfReader(filepath)
+            sample_rate = file.getSampleFrequencies()[0]
+            starttime = file.getStartdatetime()
+
+            ecg = file.readSignal(chn=0)
+
+            file.close()
+
+            # TIMESTAMP GENERATION ===================================================================================
+            print("Creating timestamps...")
+
+            end_time = starttime + timedelta(seconds=len(ecg) / sample_rate)
+            timestamps = np.asarray(pd.date_range(start=starttime, end=end_time, periods=len(ecg)))
+            print("Timestamps created.")
+
+            print("\nAssembling data...")
+            df = pd.DataFrame(list(zip(timestamps, ecg)), columns=["Timestamp", "Raw"])
             print("Dataframe created.")
 
             t1 = datetime.now()
@@ -205,7 +242,7 @@ class GENEActiv:
     # ==================================================== BLOCK 2C ===================================================
     # This block defines our method(s) for filtering data
 
-    def filter_signal(self, type="bandpass", low_f=1, high_f=10, filter_order=1):
+    def filter_signal(self, data_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=1):
         """Filtering details: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.filtfilt.html
         Arguments:
             -type: filter type - "bandpass", "lowpass", or "highpass"
@@ -215,59 +252,81 @@ class GENEActiv:
         Adds columns to dataframe corresponding to each device. Filters all devices that are available.
         """
 
-        for data_type in ["wrist", "hip", "lankle", "rankle"]:
+        if data_type == "accelerometer":
 
-            # DATA SET UP
-            if data_type == "wrist" and self.wrist_fname is not None:
-                data = np.array([self.df_wrist["X"], self.df_wrist["Y"], self.df_wrist["Z"]])
-                original_df = self.df_wrist
-                fs = self.wrist_samplerate * .5
+            self.accel_filter_low_f = low_f
+            self.accel_filter_low_h = high_f
 
-            if data_type == "hip" and self.hip_fname is not None:
-                data = np.array([self.df_hip["X"], self.df_hip["Y"], self.df_hip["Z"]])
-                original_df = self.df_hip
-                fs = self.hip_samplerate * .5
+            for data_type in ["wrist", "hip", "lankle", "rankle"]:
 
-            if data_type == "lankle" and self.lankle_fname is not None:
-                data = np.array([self.df_lankle["X"], self.df_lankle["Y"], self.df_lankle["Z"]])
-                original_df = self.df_lankle
-                fs = self.lankle_samplerate * .5
+                # DATA SET UP
+                if data_type == "wrist" and self.wrist_fname is not None:
+                    data = np.array([self.df_wrist["X"], self.df_wrist["Y"], self.df_wrist["Z"]])
+                    original_df = self.df_wrist
+                    fs = self.wrist_samplerate * .5
 
-            if data_type == "rankle" and self.rankle_fname is not None:
-                data = np.array([self.df_rankle["X"], self.df_rankle["Y"], self.df_rankle["Z"]])
-                original_df = self.df_rankle
-                fs = self.rankle_samplerate * .5
+                if data_type == "hip" and self.hip_fname is not None:
+                    data = np.array([self.df_hip["X"], self.df_hip["Y"], self.df_hip["Z"]])
+                    original_df = self.df_hip
+                    fs = self.hip_samplerate * .5
 
-            # FILTERING TYPES
-            if type == "lowpass":
-                print("\nFiltering {} accelerometer data with {}Hz, order {} lowpass filter.".format(data_type,
-                                                                                                     low_f,
-                                                                                                     filter_order))
-                low = low_f / fs
-                b, a = butter(N=filter_order, Wn=low, btype="lowpass")
-                filtered_data = filtfilt(b, a, x=data)
+                if data_type == "lankle" and self.lankle_fname is not None:
+                    data = np.array([self.df_lankle["X"], self.df_lankle["Y"], self.df_lankle["Z"]])
+                    original_df = self.df_lankle
+                    fs = self.lankle_samplerate * .5
 
-            if type == "highpass":
-                print("\nFiltering {} accelerometer data with {}Hz, order {} highpass filter.".format(data_type,
-                                                                                                      high_f,
-                                                                                                      filter_order))
-                high = high_f / fs
-                b, a = butter(N=filter_order, Wn=high, btype="highpass")
-                filtered_data = filtfilt(b, a, x=data)
+                if data_type == "rankle" and self.rankle_fname is not None:
+                    data = np.array([self.df_rankle["X"], self.df_rankle["Y"], self.df_rankle["Z"]])
+                    original_df = self.df_rankle
+                    fs = self.rankle_samplerate * .5
 
-            if type == "bandpass":
-                print("\nFiltering {} accelerometer data with {}-{}Hz, order {} bandpass filter.".format(data_type,
-                                                                                                         low_f, high_f,
-                                                                                                         filter_order))
+                # FILTERING TYPES
+                if type == "lowpass":
+                    print("\nFiltering {} accelerometer data with {}Hz, "
+                          "order {} lowpass filter.".format(data_type, low_f, filter_order))
+                    low = low_f / fs
+                    b, a = butter(N=filter_order, Wn=low, btype="lowpass")
+                    filtered_data = filtfilt(b, a, x=data)
 
-                low = low_f / fs
-                high = high_f / fs
-                b, a = butter(N=filter_order, Wn=[low, high], btype="bandpass")
-                filtered_data = filtfilt(b, a, x=data)
+                if type == "highpass":
+                    print("\nFiltering {} accelerometer data with {}Hz, "
+                          "order {} highpass filter.".format(data_type, high_f, filter_order))
+                    high = high_f / fs
+                    b, a = butter(N=filter_order, Wn=high, btype="highpass")
+                    filtered_data = filtfilt(b, a, x=data)
 
-            original_df["X_filt"] = filtered_data[0]
-            original_df["Y_filt"] = filtered_data[1]
-            original_df["Z_filt"] = filtered_data[2]
+                if type == "bandpass":
+                    print("\nFiltering {} accelerometer data with {}-{}Hz, "
+                          "order {} bandpass filter.".format(data_type, low_f, high_f, filter_order))
+
+                    low = low_f / fs
+                    high = high_f / fs
+                    b, a = butter(N=filter_order, Wn=[low, high], btype="bandpass")
+                    filtered_data = filtfilt(b, a, x=data)
+
+                original_df["X_filt"] = filtered_data[0]
+                original_df["Y_filt"] = filtered_data[1]
+                original_df["Z_filt"] = filtered_data[2]
+
+        if data_type == "ECG":
+            self.ecg_filter_freq_l = low_f
+            self.ecg_filter_freq_h = high_f
+
+            data = np.array(self.df_ecg["Raw"])
+            original_df = self.df_ecg
+            fs = self.ecg_samplerate * .5
+
+            print("\nFiltering ECG data with {}-{}Hz, order {} bandpass filter.".format(data_type, low_f,
+                                                                                        high_f, filter_order))
+
+            low = low_f / fs
+            high = high_f / fs
+            b, a = butter(N=filter_order, Wn=[low, high], btype="bandpass")
+            filtered_data = filtfilt(b, a, x=data)
+
+            original_df["Filtered"] = filtered_data
+
+        print("\nFiltering complete.")
 
     # ==================================================== BLOCK 2D ===================================================
     # This block defines our method(s) for plotting data
@@ -447,9 +506,10 @@ class GENEActiv:
     # ==================================================== BLOCK 2E ===================================================
     # This block defines our method(s) for comparing filtered to unfiltered data
 
-    def compare_filter(self, start=None, stop=None, data_type=None, downsample_factor=1):
+    def compare_filter(self, device_type=None, start=None, stop=None, downsample_factor=1):
         """Plots raw and filtered data on separate subplots.
         arguments:
+            -device_type: "hip", "wrist", "lankle", "rankle" or "ECG" --> which device to plot
             -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS"
             -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS"
             -downsample_factor: ratio by which data are downsampled. E.g. downsample=3 will downsample from 75 to 25 Hz
@@ -463,18 +523,21 @@ class GENEActiv:
         print("\n-----------------------------------------------------------------------------------------------------")
 
         # Sets which data to use
-        if data_type == "hip" or data_type == "Hip":
+        if device_type == "hip" or device_type == "Hip":
             df = self.df_hip
             fs = self.hip_samplerate
-        if data_type == "wrist" or data_type == "Wrist":
+        if device_type == "wrist" or device_type == "Wrist":
             df = self.df_wrist
             fs = self.wrist_samplerate
-        if data_type == "lankle" or data_type == "Lankle" or data_type == "LAnkle":
+        if device_type == "lankle" or device_type == "Lankle" or device_type == "LAnkle":
             df = self.df_lankle
             fs = self.lankle_samplerate
-        if data_type == "rankle" or data_type == "Rankle" or data_type == "RAnkle":
+        if device_type == "rankle" or device_type == "Rankle" or device_type == "RAnkle":
             df = self.df_rankle
             fs = self.rankle_samplerate
+        if device_type == "ECG" or device_type == "ecg":
+            df = self.df_ecg
+            fs = self.ecg_samplerate
 
         # Gets appropriate timestamps
         start, stop, data_type = self.get_timestamps(start, stop)
@@ -490,25 +553,29 @@ class GENEActiv:
         if downsample_factor != 1:
             df = df.iloc[::downsample_factor, :]
 
-            if data_type == "wrist" or data_type == "Wrist":
+            if device_type == "wrist" or device_type == "Wrist":
                 print("\nDownsampling {}Hz data by a factor of {}. "
                       "New data is {}Hz.".format(self.wrist_samplerate, downsample_factor,
                                                  round(self.wrist_samplerate / downsample_factor, 1)))
 
-            if data_type == "hip" or data_type == "Hip":
+            if device_type == "hip" or device_type == "Hip":
                 print("\nDownsampling {}Hz data by a factor of {}. "
                       "New data is {}Hz.".format(self.hip_samplerate, downsample_factor,
                                                  round(self.hip_samplerate / downsample_factor, 1)))
 
-            if data_type == "lankle" or data_type == "Lankle" or data_type == "LAnkle":
+            if device_type == "lankle" or device_type == "Lankle" or device_type == "LAnkle":
                 print("\nDownsampling {}Hz data by a factor of {}. "
                       "New data is {}Hz.".format(self.lankle_samplerate, downsample_factor,
                                                  round(self.lankle_samplerate / downsample_factor, 1)))
 
-            if data_type == "rankle" or data_type == "Rankle" or data_type == "RAnkle":
+            if device_type == "rankle" or device_type == "Rankle" or device_type == "RAnkle":
                 print("\nDownsampling {}Hz data by a factor of {}. "
                       "New data is {}Hz.".format(self.rankle_samplerate, downsample_factor,
                                                  round(self.rankle_samplerate / downsample_factor, 1)))
+            if device_type == "ECG" or device_type == "ecg":
+                print("\nDownsampling {}Hz data by a factor of {}. "
+                      "New data is {}Hz.".format(self.ecg_samplerate, downsample_factor,
+                                                 round(self.ecg_samplerate / downsample_factor, 1)))
 
         # Window length in minutes
         try:
@@ -520,7 +587,7 @@ class GENEActiv:
         if data_type == "absolute":
             df["Timestamp"] = np.arange(0, (stop - start).seconds, 1 / fs)[0:df.shape[0]]
 
-        print("Plotting {} minute section from {} to {}.".format(window_len, start, stop))
+        print("Plotting {} data: {} minute section from {} to {}.".format(device_type, window_len, start, stop))
 
         # Formatting x-axis ticks ------------------------------------------------------------------------------------
         xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
@@ -528,36 +595,54 @@ class GENEActiv:
         # Generates ~15 ticks (1/15th of window length apart)
         locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
 
-        # PLOTTING ----------------------------------------------------------------------------------------------------
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col', figsize=(self.fig_width, self.fig_height))
-        plt.subplots_adjust(bottom=.17, hspace=.33)
+        # ACCELEROMETER PLOTTING -------------------------------------------------------------------------------------
+        if device_type != "ECG" and device_type != "ecg":
+            fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col', figsize=(self.fig_width, self.fig_height))
+            plt.subplots_adjust(bottom=.17, hspace=.33)
 
-        ax1.set_title("Raw {} data".format(data_type))
-        ax1.plot(df["Timestamp"], df["X"], label="X", color='red')
-        ax1.plot(df["Timestamp"], df["Y"], label="Y", color='black')
-        ax1.plot(df["Timestamp"], df["Z"], label="Z", color='dodgerblue')
-        ax1.set_ylabel("G's")
-        ax1.legend(loc='lower left')
+            ax1.set_title("Raw {} data".format(data_type))
+            ax1.plot(df["Timestamp"], df["X"], label="X", color='red')
+            ax1.plot(df["Timestamp"], df["Y"], label="Y", color='black')
+            ax1.plot(df["Timestamp"], df["Z"], label="Z", color='dodgerblue')
+            ax1.set_ylabel("G's")
+            ax1.legend(loc='lower left')
 
-        ax2.set_title("Filtered {} data".format(data_type))
-        ax2.plot(df["Timestamp"], df["X_filt"], label="X_filt", color='red')
-        ax2.plot(df["Timestamp"], df["Y_filt"], label="Y_filt", color='black')
-        ax2.plot(df["Timestamp"], df["Z_filt"], label="Z_filt", color='dodgerblue')
-        ax2.set_ylabel("G's")
-        ax2.legend(loc='lower left')
+            ax2.set_title("Filtered {} data".format(data_type))
+            ax2.plot(df["Timestamp"], df["X_filt"], label="X_filt", color='red')
+            ax2.plot(df["Timestamp"], df["Y_filt"], label="Y_filt", color='black')
+            ax2.plot(df["Timestamp"], df["Z_filt"], label="Z_filt", color='dodgerblue')
+            ax2.set_ylabel("G's")
+            ax2.legend(loc='lower left')
+
+            if data_type == "timestamp":
+                ax2.xaxis.set_major_formatter(xfmt)
+                ax2.xaxis.set_major_locator(locator)
+            if data_type == "absolute":
+                ax2.set_xlabel("Seconds into collection")
+
+        # ECG PLOTTING -----------------------------------------------------------------------------------------------
+        if device_type == "ECG" or device_type == "ecg":
+            fig, ax1 = plt.subplots(1, figsize=(self.fig_width, self.fig_height))
+
+            ax1.set_title("Raw and Filtered ({}-{} Hz bandpass) ECG data".format(self.ecg_filter_freq_l,
+                                                                                 self.ecg_filter_freq_h))
+            ax1.plot(df["Timestamp"], df["Raw"], color='red', label="Raw")
+            ax1.plot(df["Timestamp"], df["Filtered"], color='black', label="Filtered")
+            ax1.legend(loc='best')
+            ax1.set_ylabel("Voltage")
 
         if data_type == "timestamp":
-            ax2.xaxis.set_major_formatter(xfmt)
-            ax2.xaxis.set_major_locator(locator)
+            ax1.xaxis.set_major_formatter(xfmt)
+            ax1.xaxis.set_major_locator(locator)
         if data_type == "absolute":
-            ax2.set_xlabel("Seconds into collection")
+            ax1.set_xlabel("Seconds into collection")
 
         plt.xticks(rotation=45, fontsize=8)
 
-        plt.savefig("{}_RawAndFiltered_{} to {}.png".format(data_type.capitalize(),
+        plt.savefig("{}_RawAndFiltered_{} to {}.png".format(device_type.capitalize(),
                                                             datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                             datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
-        print("Plot saved as png ({}_RawAndFiltered_{} to {}.png)".format(data_type.capitalize(),
+        print("Plot saved as png ({}_RawAndFiltered_{} to {}.png)".format(device_type.capitalize(),
                                                                           datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
                                                                           datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
@@ -849,7 +934,8 @@ class GENEActiv:
         xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
 
         # Generates ~15 ticks (1/15th of window length apart)
-        locator = mdates.MinuteLocator(byminute=np.arange(0, 60, int(np.ceil(window_len / 15))), interval=1)
+        print(window_len)
+        locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
 
         ax1.xaxis.set_major_formatter(xfmt)
         ax1.xaxis.set_major_locator(locator)
@@ -872,12 +958,14 @@ class GENEActiv:
 # ==================================================== BLOCK 3 =====================================================
 # This block identifies the files of interest and creates corresponding data objects
 """Change the filepath(s) to the file(s) of interest (e.g. x = GENEActiv(hip_filepath=*"Test_Body.EDF"*)"""
-
+"""
 x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
               wrist_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
               leftankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LAnkle.csv",
               rightankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_RAnkle.csv",
-              fig_height=7, fig_width=14)
+              fig_height=6, fig_width=10)"""
+x = GENEActiv(ecg_filepath="/Users/kyleweber/Desktop/Data/KW4_BittiumFaros.EDF",
+              wrist_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv")
 
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
@@ -886,7 +974,8 @@ x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
 # Run this block if filtering of data is required ###
 """If applicable, change filtering arguments type, low_f, high_f, sample_f, and filter_order"""
 
-x.filter_signal(type="bandpass", low_f=1, high_f=10, filter_order=3)
+# x.filter_signal(data_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=3)
+x.filter_signal(data_type="ECG", type="bandpass", low_f=5, high_f=15, filter_order=3)
 
 # ==================================================== BLOCK 5 =====================================================
 # This block epochs the signals read from the data files to calculate activity counts ###
@@ -894,7 +983,7 @@ x.filter_signal(type="bandpass", low_f=1, high_f=10, filter_order=3)
 # This will print out a Pearson correlation matrix for each body segment ###
 """If applicable, change epoching argument epoch_length"""
 
-x.df_epoched = x.epoch_data(epoch_length=15)
+# x.df_epoched = x.epoch_data(epoch_length=15)
 
 # ==================================================== BLOCK 6A =====================================================
 # This block plots the entire dataset (or if applicable, data within a window based on timestamps) ###
@@ -903,7 +992,7 @@ x.df_epoched = x.epoch_data(epoch_length=15)
 """Remove # from line 1 if using specific timestamps (formatted as YYYY-MM-DD HH:MM:SS)"""
 """If applicable, change time argument start, stop; downsample_factor will decrease # of samples"""
 
-x.plot_data(start="2018-07-03 13:15:00", stop="2018-07-03 13:35:00", downsample_factor=1)  # Section of data
+# x.plot_data(start="2018-07-03 13:15:00", stop="2018-07-03 13:35:00", downsample_factor=1)  # Section of data
 # x.plot_data(start=15, stop=20, downsample_factor=1)  # Plots whole file OR plots region previously specified
 
 # ==================================================== BLOCK 6B =====================================================
@@ -918,7 +1007,8 @@ x.plot_data(start="2018-07-03 13:15:00", stop="2018-07-03 13:35:00", downsample_
 """Remove # from line 1 if applying block of code"""
 """If applicable, change time argument start, stop; downsample_factor will decrease # of samples"""
 
-# x.compare_filter(data_type="lankle", downsample_factor=1)
+# x.compare_filter(device_type="lankle", downsample_factor=1)
+x.compare_filter(device_type="ECG", downsample_factor=1, start=0, stop=2)
 
 # ==================================================== BLOCK 8 =====================================================
 # This block creates plots with peaks identified based on parameters specified in Block 2E ###
@@ -934,7 +1024,7 @@ x.plot_data(start="2018-07-03 13:15:00", stop="2018-07-03 13:35:00", downsample_
 # Run this block if activity count plot is required ###
 # This will plot data and also generate a .PNG file ###
 """Remove # from line 1 if applying block of code"""
-x.plot_epoched()
+# x.plot_epoched()
 
 # ==================================================== BLOCK 9 =====================================================
 # This block creates a delimited spreadsheet file for epoched data ###
