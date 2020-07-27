@@ -1,29 +1,33 @@
-import pyedflib  # wavelet toolbox for reading / writing EDF/BDF files
-import numpy as np  ## package for scientific computing
+import pyedflib  # toolbox for reading / writing EDF/BDF files
+import numpy as np  # package for scientific computing
 import pandas as pd  # package for data analysis and manipulation tools
 from datetime import datetime  # module supplying classes for manipulating dates and times
 from datetime import timedelta
 import matplotlib.pyplot as plt  # library for creating static, animated, and interactive visualizations
-import matplotlib.dates as mdates
+import matplotlib.dates as mdates  # library for formatting plot axes labels as dates
 import os  # module allowing code to use operating system dependent functionality
 from scipy.signal import butter, filtfilt  # signal processing toolbox
 import peakutils  # package for utilities related to the detection of peaks on 2D data
 
 
-class GENEActiv:
+class Wearables:
 
     # ==================================================== BLOCK 2A ===================================================
-    # This block defines our method(s) for loading our accelerometer files
+    # This block defines our method(s) for loading our accelerometer and ECG files
 
     def __init__(self, wrist_filepath=None, hip_filepath=None, leftankle_filepath=None, rightankle_filepath=None,
                  ecg_filepath=None, fig_height=7, fig_width=12):
-        """Class that reads in GENEActiv data (EDF). Data is read in and no further methods are called.
+        """Class that reads in GENEActiv and bittium Faros data (EDF).
+            Data is read in and no further methods are called.
+
             :arguments:
-            -wrist_filepath, hip_filepath, leftankle_filepath, rightright_filepath: full pathway to all .edf files
-             to read in. Default value is None; fill will not be read in if no argument given
-             -fig_heigth, fig_width: figure height and width in inches (I think). Must be whole number.
+            -wrist_filepath, hip_filepath, leftankle_filepath, rightright_filepath, ecg_filepath:
+                    full pathway to all .edf files to read in. Default value is None;
+                    fill will not be read in if no argument given
+             -fig_heigth, fig_width: figure height and width in inches. Must be whole number.
             """
 
+        # Default values for objects ----------------------------------------------------------------------------------
         self.wrist_fname = wrist_filepath
         self.hip_fname = hip_filepath
         self.lankle_fname = leftankle_filepath
@@ -38,6 +42,9 @@ class GENEActiv:
         self.ecg_filter_freq_l = None
         self.ecg_filter_freq_h = None
 
+        self.df_epoched = None
+
+        # Methods and objects that are run automatically when class instance is created -------------------------------
         self.df_wrist, self.wrist_samplerate = self.load_correct_file(filepath=self.wrist_fname, f_type="Wrist")
         self.df_hip, self.hip_samplerate = self.load_correct_file(filepath=self.hip_fname, f_type="Hip")
         self.df_lankle, self.lankle_samplerate = self.load_correct_file(filepath=self.lankle_fname,
@@ -46,13 +53,17 @@ class GENEActiv:
                                                                         f_type="Right ankle")
         self.df_ecg, self.ecg_samplerate = self.import_edf(filepath=self.ecg_fname, f_type="ECG")
 
-        self.df_epoched = None
+        if self.ecg_fname is not None:
+            self.sync_accel_ecg()
 
         # 'Memory' stamps for previously-graphed region
         self.start_stamp = None
         self.stop_stamp = None
 
     def load_correct_file(self, filepath, f_type):
+        """Method that specifies the correct file (.edf vs. .csv) to import for accelerometer files and
+           retrieves sample rates.
+        """
 
         if filepath is None:
             print("\nNo {} filepath given.".format(f_type))
@@ -68,7 +79,8 @@ class GENEActiv:
 
     @staticmethod
     def import_edf(filepath=None, f_type="Accelerometer"):
-        """Method that imports EDF from specified filepath and returns a df of timestamps and x, y, z channels.
+        """Method that imports EDF from specified filepath and returns a df of timestamps relevant data.
+           Works for both GENEACtiv and Bittium Faros EDF files.
            Also returns sampling rate.
            If no file was specified or a None was given, method returns None, None"""
 
@@ -146,6 +158,9 @@ class GENEActiv:
 
     @staticmethod
     def import_csv(filepath=None, f_type="Accelerometer"):
+        """Method to import GENEActiv .csv files. Only works for .csv. files created using GENEAtiv software.
+           Finds sampling rate from data file.
+        """
 
         if filepath is None:
             print("No {} filepath given.".format(f_type))
@@ -179,8 +194,63 @@ class GENEActiv:
 
         return df, sample_rate
 
+    def sync_accel_ecg(self):
+        """Crops Accel/ECG files so they start with the same timestamps. Issue since Bittium cannot be started
+           automatically at a specific time. Assumings all GENEActivs start at same time."""
+
+        ecg_synced = False
+
+        if self.ecg_fname is not None:
+
+            # Hip accel data
+            if self.hip_fname is not None:
+                # If hip started first
+                if self.df_ecg["Timestamp"].iloc[0] > self.df_hip["Timestamp"].iloc[0]:
+                    self.df_hip = self.df_hip.loc[self.df_hip["Timestamp"] >= self.df_ecg["Timestamp"].iloc[0]]
+                    print("Cropping hip file to match ECG collection...")
+                # If ECG started first
+                if self.df_ecg["Timestamp"].iloc[0] < self.df_hip["Timestamp"].iloc[0] and not ecg_synced:
+                    self.df_ecg = self.df_ecg.loc[self.df_ecg["Timestamp"] >= self.df_hip["Timestamp"].iloc[0]]
+                    print("Cropping ECG file to match accelerometer collection...")
+                    ecg_synced = True
+
+            # Wrist accel data
+            if self.wrist_fname is not None:
+                # If wrist started first
+                if self.df_ecg["Timestamp"].iloc[0] > self.df_wrist["Timestamp"].iloc[0]:
+                    self.df_wrist = self.df_wrist.loc[self.df_wrist["Timestamp"] >= self.df_ecg["Timestamp"].iloc[0]]
+                    print("Cropping wrist file to match ECG collection...")
+                # If ECG started first
+                if self.df_ecg["Timestamp"].iloc[0] < self.df_wrist["Timestamp"].iloc[0] and not ecg_synced:
+                    self.df_ecg = self.df_ecg.loc[self.df_ecg["Timestamp"] >= self.df_wrist["Timestamp"].iloc[0]]
+                    print("Cropping ECG file to match accelerometer collection...")
+                    ecg_synced = True
+
+            # LAnkle accel data
+            if self.lankle_fname is not None:
+                # If wrist started first
+                if self.df_ecg["Timestamp"].iloc[0] > self.df_lankle["Timestamp"].iloc[0]:
+                    self.df_lankle = self.df_lankle.loc[self.df_lankle["Timestamp"] >= self.df_ecg["Timestamp"].iloc[0]]
+                    print("Cropping left ankle file to match ECG collection...")
+                # If ECG started first
+                if self.df_ecg["Timestamp"].iloc[0] < self.df_lankle["Timestamp"].iloc[0] and not ecg_synced:
+                    self.df_ecg = self.df_ecg.loc[self.df_ecg["Timestamp"] >= self.df_lankle["Timestamp"].iloc[0]]
+                    print("Cropping ECG file to match accelerometer collection...")
+                    ecg_synced = True
+
+            # RAnkle accel data
+            if self.rankle_fname is not None:
+                # If wrist started first
+                if self.df_ecg["Timestamp"].iloc[0] > self.df_rankle["Timestamp"].iloc[0]:
+                    self.df_rankle = self.df_rankle.loc[self.df_rankle["Timestamp"] >= self.df_ecg["Timestamp"].iloc[0]]
+                    print("Cropping right ankle file to match ECG collection...")
+                # If ECG started first
+                if self.df_ecg["Timestamp"].iloc[0] < self.df_rankle["Timestamp"].iloc[0] and not ecg_synced:
+                    self.df_ecg = self.df_ecg.loc[self.df_ecg["Timestamp"] >= self.df_rankle["Timestamp"].iloc[0]]
+                    print("Cropping ECG file to match accelerometer collection...")
+
     # ==================================================== BLOCK 2B ===================================================
-    # This block defines our method(s) for epoching our data to calculate activity counts
+    # This block defines our method(s) for epoching our data to calculate activity counts and heart rate.
 
     def epoch_data(self, epoch_length=15):
         """Creates df of epoched data for all available devices. Able to set epoch_length in seconds."""
@@ -191,45 +261,50 @@ class GENEActiv:
         devices = ["Timestamp"]
 
         for data_type in ["wrist", "hip", "lankle", "rankle"]:
+            data = None
 
             # DATA SET UP
             if data_type == "wrist" and self.wrist_fname is not None:
-                data = self.df_wrist["Mag"]
+                print("Epoching wrist data...")
+                data = self.df_wrist["Mag"].copy()
                 fs = self.wrist_samplerate
                 devices.append(data_type.capitalize())
                 timestamps = self.df_wrist["Timestamp"]
 
             if data_type == "hip" and self.hip_fname is not None:
+                print("Epoching hip data...")
                 data = self.df_hip["Mag"]
                 fs = self.hip_samplerate
                 devices.append(data_type.capitalize())
                 timestamps = self.df_hip["Timestamp"]
 
             if data_type == "lankle" and self.lankle_fname is not None:
+                print("Epoching left ankle data...")
                 data = self.df_lankle["Mag"]
                 fs = self.lankle_samplerate
                 devices.append(data_type.capitalize())
                 timestamps = self.df_lankle["Timestamp"]
 
             if data_type == "rankle" and self.rankle_fname is not None:
+                print("Epoching right ankle data...")
                 data = self.df_rankle["Mag"]
                 fs = self.rankle_samplerate
                 devices.append(data_type.capitalize())
                 timestamps = self.df_rankle["Timestamp"]
 
-            svm = []
+            if data is not None:
+                svm = []
 
-            for i in np.arange(0, data.shape[0], fs * epoch_length):
-                svm.append(sum(data.iloc[int(i):int(i + fs)]))
+                for i in np.arange(0, data.shape[0], fs * epoch_length):
+                    svm.append(sum(data.iloc[int(i):int(i + fs)]))
 
-            svm_lists.append(svm)
+                svm_lists.append(svm)
 
         df = pd.DataFrame(svm_lists).transpose()
-
-        epoch_stamps = [timestamps.iloc[0] + timedelta(seconds=15) * i for i in range(0, df.shape[0])]
+        epoch_stamps = [timestamps.iloc[0] + timedelta(seconds=epoch_length) * i for i in range(0, df.shape[0])]
 
         df.insert(loc=0, column="Timestamp", value=epoch_stamps)
-        df.columns = devices
+        df.columns = [i for i in devices]
 
         print("Epoching complete.")
 
@@ -239,12 +314,50 @@ class GENEActiv:
 
         return df
 
-    # ==================================================== BLOCK 2C ===================================================
-    # This block defines our method(s) for filtering data
+    def calculate_hr(self, epoch_length):
 
-    def filter_signal(self, data_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=1):
+        if "Filtered" in self.df_ecg.columns:
+            data = np.array(self.df_ecg["Filtered"])
+            peaks = peakutils.indexes(y=data, thres_abs=True, thres=300, min_dist=int(self.ecg_samplerate / 3.33))
+
+            epoch_hr = []
+
+            for ind in np.arange(0, peaks[-1], self.ecg_samplerate * epoch_length):
+                try:
+                    epoch = [peak for peak in peaks if ind <= peak < ind + self.ecg_samplerate * epoch_length]
+
+                    time_diff = (epoch[-1] - epoch[0]) / self.ecg_samplerate
+
+                    if time_diff == 0:
+                        epoch_hr.append(None)
+                        break
+
+                    n_beats = len(epoch) - 1
+                    hr = 60 * n_beats / time_diff
+
+                    epoch_hr.append(round(hr, 1))
+
+                except IndexError:
+                    epoch_hr.append(None)
+
+            df_hr = pd.DataFrame(list(zip([self.df_ecg.iloc[i]["Timestamp"]
+                                          for i in np.arange(0, peaks[-1], self.ecg_samplerate * epoch_length)],
+                                          epoch_hr)), columns=["Timestamp", "HR"])
+
+            return df_hr
+
+        if "Filtered" not in self.df_ecg.columns:
+            print("\nFunction requires filtered ECG. Please filter the data using the "
+                  "'x.filter_signal(data_type='ECG')'function and try again.")
+            return None
+
+    # ==================================================== BLOCK 2C ===================================================
+    # This block defines our method(s) for filtering data. Able to filter accelerometer and ECG data.
+
+    def filter_signal(self, device_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=1):
         """Filtering details: https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.filtfilt.html
         Arguments:
+            -device_type: "accelerometer" or "ECG"
             -type: filter type - "bandpass", "lowpass", or "highpass"
             -low_f: low-end cutoff frequency, required for lowpass and bandpass filters
             -high_f: high-end cutoff frequency, required for highpass and bandpass filters
@@ -252,7 +365,7 @@ class GENEActiv:
         Adds columns to dataframe corresponding to each device. Filters all devices that are available.
         """
 
-        if data_type == "accelerometer":
+        if device_type == "accelerometer":
 
             self.accel_filter_low_f = low_f
             self.accel_filter_low_h = high_f
@@ -308,7 +421,7 @@ class GENEActiv:
                 original_df["Y_filt"] = filtered_data[1]
                 original_df["Z_filt"] = filtered_data[2]
 
-        if data_type == "ECG":
+        if device_type == "ECG" or device_type == "ecg":
             self.ecg_filter_freq_l = low_f
             self.ecg_filter_freq_h = high_f
 
@@ -316,8 +429,7 @@ class GENEActiv:
             original_df = self.df_ecg
             fs = self.ecg_samplerate * .5
 
-            print("\nFiltering ECG data with {}-{}Hz, order {} bandpass filter.".format(data_type, low_f,
-                                                                                        high_f, filter_order))
+            print("\nFiltering ECG data with {}-{}Hz, order {} bandpass filter.".format(low_f, high_f, filter_order))
 
             low = low_f / fs
             high = high_f / fs
@@ -329,7 +441,7 @@ class GENEActiv:
         print("\nFiltering complete.")
 
     # ==================================================== BLOCK 2D ===================================================
-    # This block defines our method(s) for plotting data
+    # This block defines our method(s) for plotting raw wrist and hip accelerometer data
 
     def plot_data(self, start=None, stop=None, downsample_factor=1):
         """Plots hip and wrist data whichever/both is available.
@@ -504,7 +616,8 @@ class GENEActiv:
                                                                  datetime.strftime(stop_stamp, "%Y-%m-%d %H_%M_%S")))
 
     # ==================================================== BLOCK 2E ===================================================
-    # This block defines our method(s) for comparing filtered to unfiltered data
+    # This block defines our method(s) for comparing filtered to unfiltered data. Plots raw and filtered data from
+    # specified device.
 
     def compare_filter(self, device_type=None, start=None, stop=None, downsample_factor=1):
         """Plots raw and filtered data on separate subplots.
@@ -647,7 +760,7 @@ class GENEActiv:
                                                                           datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
     # ==================================================== BLOCK 2F ===================================================
-    # This block defines our method(s) for identifying timestamps (previously used ones to replot same data regions)
+    # This block defines our method(s) for identifying timestamps (previously used ones to re-plot same data regions)
 
     def get_timestamps(self, start=None, stop=None):
 
@@ -707,7 +820,7 @@ class GENEActiv:
         return start_stamp, stop_stamp, data_type
 
     # ==================================================== BLOCK 2G ===================================================
-    # This block defines our method(s) for basic peak detection using thresholding
+    # This block defines our method(s) for basic accelerometer peak detection using thresholding
 
     def plot_peaks(self, signal="X", thresh_type="normalized",
                    peak_thresh=0.5, min_peak_dist=500, downsample_factor=1,
@@ -880,7 +993,7 @@ class GENEActiv:
                                                         datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
     # ==================================================== BLOCK 2H ===================================================
-    # This block defines our method(s) for plotting epoched data (activity counts)
+    # This block defines our method(s) for plotting epoched accelerometer data (activity counts)
 
     def plot_epoched(self, start=None, stop=None):
         """Plots epoched data for all available devices.
@@ -934,7 +1047,6 @@ class GENEActiv:
         xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
 
         # Generates ~15 ticks (1/15th of window length apart)
-        print(window_len)
         locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
 
         ax1.xaxis.set_major_formatter(xfmt)
@@ -945,6 +1057,109 @@ class GENEActiv:
                                                       datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
     # ==================================================== BLOCK 2I ===================================================
+    # This block defines out method(s) for plotting raw or epoched ECG + one accelerometer data
+
+    def plot_ecg_and_accel(self, accel_type, data_type="epoched", start=None, stop=None):
+
+        if accel_type is None:
+            print("Please specificy accelerometer (wrist, hip, lankle, rankle) and try again")
+            return None
+
+        print("\n--------------------------------------------------------------------------------------------------")
+        print("Plotting {} ECG and {} data...".format(data_type, accel_type))
+
+        # Gets appropriate timestamps
+        start, stop, stamp_type = self.get_timestamps(start, stop)
+
+        # Sets 'memory' values to current start/stop values
+        self.start_stamp = start
+        self.stop_stamp = stop
+
+        # Window length in minutes
+        try:
+            window_len = (stop - start).seconds / 60
+        except TypeError:
+            window_len = (datetime.strptime(stop, "%Y-%m-%d %H:%M:%S") -
+                          datetime.strptime(start, "%Y-%m-%d %H:%M:%S")).seconds / 60
+
+        print("Plotting {} minute section of epoched data from {} to {}.".format(window_len, start, stop))
+
+        # Sets up data ----------------------------------------------------------------------------------------
+        if accel_type == "LAnkle" or accel_type == "Lankle" or accel_type == "lankle":
+            if data_type == "raw":
+                df_acc = self.df_lankle.copy()
+        if accel_type == "RAnkle" or accel_type == "Rankle" or accel_type == "rankle":
+            if data_type == "raw":
+                df_acc = self.df_rankle.copy()
+        if accel_type == "Wrist" or accel_type == "wrist":
+            if data_type == "raw":
+                df_acc = self.df_wrist.copy()
+        if accel_type == "Hip" or accel_type == "hip":
+            if data_type == "raw":
+                df_acc = self.df_hip.copy()
+
+        if data_type == "raw":
+            df_ecg = self.df_ecg.copy()
+
+        if data_type == "epoched" or data_type == "epoch":
+            df_acc = self.df_epoched[["Timestamp", accel_type.capitalize()]]
+            df_ecg = self.df_epoched_hr
+
+        # Crops dataframes to selected region
+        df_acc = df_acc.loc[(df_acc["Timestamp"] > start) & (df_acc["Timestamp"] < stop)]
+        df_ecg = df_ecg.loc[(df_ecg["Timestamp"] > start) & (df_ecg["Timestamp"] < stop)]
+
+        # Calculates epoch_length
+        epoch_length = (df_acc.iloc[1]["Timestamp"] - df_acc.iloc[0]["Timestamp"]).seconds
+
+        # Plotting ----------------------------------------------------------------------------------------
+        fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
+        plt.subplots_adjust(bottom=.15)
+        plt.suptitle("{} ECG and {} Data".format(data_type.capitalize(), accel_type))
+
+        if data_type == "raw":
+            ax1.plot(df_acc["Timestamp"], df_acc["X"], color='red', label="{}_X".format(data_type))
+            ax1.plot(df_acc["Timestamp"], df_acc["Y"], color='black', label="{}_Y".format(data_type))
+            ax1.plot(df_acc["Timestamp"], df_acc["Z"], color='dodgerblue', label="{}_Z".format(data_type))
+
+            ax1.set_ylabel("G's")
+            ax1.legend()
+
+            ax2.plot(df_ecg["Timestamp"], df_ecg["Filtered"], color='red', label="Filtered ECG")
+            ax2.set_ylabel("Voltage")
+            ax2.legend()
+
+        if data_type == "epoch" or data_type == "epoched":
+            ax1.bar(df_acc["Timestamp"], df_acc[accel_type.capitalize()], width=epoch_length / 86400,
+                    color='dodgerblue', edgecolor='black', label=accel_type)
+            ax1.set_ylabel("Counts")
+            ax1.legend()
+
+            ax2.plot(df_ecg["Timestamp"], df_ecg["HR"],
+                     color='black', marker='o', markerfacecolor='red', linestyle=" ")
+            ax2.set_ylabel("BPM")
+            ax2.set_ylim(40, max(df_ecg["HR"]) * 1.05)
+            ax2.legend()
+
+        # Formatting x-axis ticks ------------------------------------------------------------------------------------
+        xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
+
+        # Generates ~15 ticks (1/15th of window length apart)
+        locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
+
+        ax2.xaxis.set_major_formatter(xfmt)
+        ax2.xaxis.set_major_locator(locator)
+        plt.xticks(rotation=45, fontsize=8)
+
+        print("Saving plot to {}_ECG_{}_{} to {}.png".format(data_type.capitalize(), accel_type,
+                                                             datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
+                                                             datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+
+        plt.savefig("{}_ECG_{}_{} to {}.png".format(data_type.capitalize(), accel_type,
+                                                    datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
+                                                    datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+
+    # ==================================================== BLOCK 2J ===================================================
     # This block defines our method(s) for creating CSV files of our activity counts ###
 
     def write_epoched_csv(self):
@@ -957,15 +1172,19 @@ class GENEActiv:
 
 # ==================================================== BLOCK 3 =====================================================
 # This block identifies the files of interest and creates corresponding data objects
-"""Change the filepath(s) to the file(s) of interest (e.g. x = GENEActiv(hip_filepath=*"Test_Body.EDF"*)"""
+"""Change the filepath(s) to the file(s) of interest (e.g. x = Wearables(hip_filepath=*"Test_Body.EDF"*)"""
 """
-x = GENEActiv(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
+x = Wearables(hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
               wrist_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
               leftankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LAnkle.csv",
               rightankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_RAnkle.csv",
               fig_height=6, fig_width=10)"""
-x = GENEActiv(ecg_filepath="/Users/kyleweber/Desktop/Data/KW4_BittiumFaros.EDF",
-              wrist_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv")
+x = Wearables(ecg_filepath="/Users/kyleweber/Desktop/Data/KW4_BittiumFaros.EDF",
+              hip_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
+              wrist_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LWrist.csv",
+              leftankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_LAnkle.csv",
+              rightankle_filepath="/Users/kyleweber/Desktop/Data/KW4_GA_RAnkle.csv",
+              fig_height=6, fig_width=10)
 
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
@@ -974,8 +1193,8 @@ x = GENEActiv(ecg_filepath="/Users/kyleweber/Desktop/Data/KW4_BittiumFaros.EDF",
 # Run this block if filtering of data is required ###
 """If applicable, change filtering arguments type, low_f, high_f, sample_f, and filter_order"""
 
-# x.filter_signal(data_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=3)
-x.filter_signal(data_type="ECG", type="bandpass", low_f=5, high_f=15, filter_order=3)
+x.filter_signal(device_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=3)
+x.filter_signal(device_type="ECG", type="bandpass", low_f=5, high_f=15, filter_order=3)
 
 # ==================================================== BLOCK 5 =====================================================
 # This block epochs the signals read from the data files to calculate activity counts ###
@@ -983,7 +1202,7 @@ x.filter_signal(data_type="ECG", type="bandpass", low_f=5, high_f=15, filter_ord
 # This will print out a Pearson correlation matrix for each body segment ###
 """If applicable, change epoching argument epoch_length"""
 
-# x.df_epoched = x.epoch_data(epoch_length=15)
+x.df_epoched = x.epoch_data(epoch_length=15)
 
 # ==================================================== BLOCK 6A =====================================================
 # This block plots the entire dataset (or if applicable, data within a window based on timestamps) ###
@@ -1008,7 +1227,7 @@ x.filter_signal(data_type="ECG", type="bandpass", low_f=5, high_f=15, filter_ord
 """If applicable, change time argument start, stop; downsample_factor will decrease # of samples"""
 
 # x.compare_filter(device_type="lankle", downsample_factor=1)
-x.compare_filter(device_type="ECG", downsample_factor=1, start=0, stop=2)
+# x.compare_filter(device_type="ECG", downsample_factor=1, start=0, stop=1)
 
 # ==================================================== BLOCK 8 =====================================================
 # This block creates plots with peaks identified based on parameters specified in Block 2E ###
@@ -1019,16 +1238,37 @@ x.compare_filter(device_type="ECG", downsample_factor=1, start=0, stop=2)
 
 # x.plot_peaks(signal="X_filt", thresh_type="normalized", peak_thresh=.7, min_peak_dist=400, downsample_factor=1, start=5, stop=15)
 
-# ==================================================== BLOCK 8 =====================================================
-# This block creates plots for epoched data ###
+# ==================================================== BLOCK 9 =====================================================
+# This block creates plots for epoched data and heart rate.###
 # Run this block if activity count plot is required ###
 # This will plot data and also generate a .PNG file ###
-"""Remove # from line 1 if applying block of code"""
+"""Remove # from line 1 or 2 if applying block of code"""
 # x.plot_epoched()
+# x.df_epoched_hr = x.calculate_hr(epoch_length=15)
 
-# ==================================================== BLOCK 9 =====================================================
+# ==================================================== BLOCK 10 =====================================================
+# This block allows you to plot raw accelerometer and ECG data, or epoched accelerometer and HR data to view how
+# summary measures help give meaning to the data and make them easier to interpret.
+"""Remove # from line 1 if applying block of code"""
+# x.plot_ecg_and_accel(data_type="raw", accel_type="LAnkle")
+
+# ==================================================== BLOCK 11 =====================================================
 # This block creates a delimited spreadsheet file for epoched data ###
 # Run this block if a new spreadsheet is required ###
 # This will generate a .CSV file ###
 """Remove # from line 1 if applying block of code"""
 # x.write_epoched_csv()
+
+
+# UPDATES ===========================================================================================================
+# Reads in Bititum Faros file (.EDF)
+# x.sync_accel_ecg(): function that crops files so that accelerometers and ECG start at same time. Epochs will also
+#                     be the same windows now.
+# x.filter_signal: now able to run bandpass filter on ECG data. Changed a couple argument names
+# x.calculate_hr(): epoching of ECG data. Calculates average HR over epoch_length seconds. Peaks detected same way as
+#                   steps (simple thresholding) - nothing complicated here.
+# x.plot_ecg_and_accel(): plots either raw or epoched data from one accel and ECG. Able to specify raw vs. epoched with
+#                         data_type argument, and which accel using accel_type argument. Timestamps behave the same as
+#                         the other plotting functions.
+#                         In block 11
+# Changed some block numbers (Blocks 2x and blocks > 8); likely will need reformatting for your organization
