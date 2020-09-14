@@ -43,6 +43,8 @@ class Wearables:
 
         self.df_epoched = None
 
+        self.filter_run = False
+
         # Methods and objects that are run automatically when class instance is created -------------------------------
         self.df_hip, self.hip_samplerate = self.load_correct_file(filepath=self.hip_fname,
                                                                   f_type="Hip")
@@ -244,6 +246,7 @@ class Wearables:
                 original_df["Z_filt"] = filtered_data[2]
 
         print("\nFiltering complete.")
+        self.filter_run = True
 
     # ==================================================== BLOCK 2C ===================================================
 
@@ -270,6 +273,11 @@ class Wearables:
             print("Using filtered data.")
             column_suffix = "_filt"
             filter_type = "Filtered"
+
+            if not self.filter_run:
+                print("You have not filtered the data yet. Run a filter and try again!")
+                return None
+
         if not filtered:
             print("Using raw data.")
             column_suffix = ""
@@ -515,9 +523,10 @@ class Wearables:
 
     # ==================================================== BLOCK 2D ===================================================
 
-    def compare_filter(self, device_type=None, start=None, stop=None, downsample_factor=1):
+    def compare_filter(self, axis="all", device_type=None, start=None, stop=None, downsample_factor=1):
         """Plots raw and filtered data on separate subplots.
         arguments:
+            -axis: which accelerometer axis/axes to plot. "all", "x", "y", or "z"
             -device_type: "hip" or "ankle" --> which device to plot
             -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS"
             -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS"
@@ -597,17 +606,31 @@ class Wearables:
             fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col', figsize=(self.fig_width, self.fig_height))
             plt.subplots_adjust(bottom=.17, hspace=.33)
 
-            ax1.set_title("Raw {} data".format(data_type))
-            ax1.plot(df["Timestamp"], df["X"], label="X", color='red')
-            ax1.plot(df["Timestamp"], df["Y"], label="Y", color='black')
-            ax1.plot(df["Timestamp"], df["Z"], label="Z", color='dodgerblue')
+            ax1.set_title("Raw data")
+            if axis == "all" or axis == "All" or axis == "x" or axis == "X":
+                ax1.plot(df["Timestamp"], df["X"], label="X", color='red')
+
+            if axis == "all" or axis == "All" or axis == "y" or axis == "Y":
+                ax1.plot(df["Timestamp"], df["Y"], label="Y", color='black')
+
+            if axis == "all" or axis == "All" or axis == "z" or axis == "Z":
+                ax1.plot(df["Timestamp"], df["Z"], label="Z", color='dodgerblue')
+
             ax1.set_ylabel("G's")
             ax1.legend(loc='lower left')
 
-            ax2.set_title("Filtered {} data".format(data_type))
-            ax2.plot(df["Timestamp"], df["X_filt"], label="X_filt", color='red')
-            ax2.plot(df["Timestamp"], df["Y_filt"], label="Y_filt", color='black')
-            ax2.plot(df["Timestamp"], df["Z_filt"], label="Z_filt", color='dodgerblue')
+            if self.filter_run:
+                ax2.set_title("Filtered data")
+
+                if axis == "all" or axis == "All" or axis == "x" or axis == "X":
+                    ax2.plot(df["Timestamp"], df["X_filt"], label="X_filt", color='red')
+                if axis == "all" or axis == "All" or axis == "y" or axis == "Y":
+                    ax2.plot(df["Timestamp"], df["Y_filt"], label="Y_filt", color='black')
+                if axis == "all" or axis == "All" or axis == "z" or axis == "Z":
+                    ax2.plot(df["Timestamp"], df["Z_filt"], label="Z_filt", color='dodgerblue')
+            if not self.filter_run:
+                print("No filter has been run. Run a filter and try again.")
+
             ax2.set_ylabel("G's")
             ax2.legend(loc='lower left')
 
@@ -636,12 +659,13 @@ class Wearables:
 
         plt.xticks(rotation=45, fontsize=8)
 
-        plt.savefig("{}_RawAndFiltered_{} to {}.png".format(device_type.capitalize(),
-                                                            datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
-                                                            datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
-        print("Plot saved as png ({}_RawAndFiltered_{} to {}.png)".format(device_type.capitalize(),
-                                                                          datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
-                                                                          datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+        plt.savefig("{}_RawAndFiltered_{}Axis_{} to {}.png".format(device_type.capitalize(), axis,
+                                                                   datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
+                                                                   datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+        print("Plot saved as png ({}_RawAndFiltered_{}Axis"
+              "_{} to {}.png)".format(device_type.capitalize(), axis,
+                                      datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
+                                      datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
 
     # ==================================================== BLOCK 2E ===================================================
 
@@ -810,27 +834,26 @@ print("-Wrist sampling rate = {} Hz".format(x.wrist_samplerate)) # displays the 
 
 # ADDITIONAL FUNCTIONS TO RUN -----------------------------------------------------------------------------------------
 
-x.filter_signal(device_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=3)
+# x.filter_signal(device_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=3)
 
 # ==================================================== BLOCK 5 =====================================================
 
-# x.plot_data(downsample_factor=1, filtered=True)  # plots whole file
+x.plot_data(downsample_factor=1, filtered=True)  # plots whole file
 # x.plot_data(start="2020-08-24 13:13:08", stop="2020-08-24 13:13:12", downsample_factor=1, filtered=True)
 
 # ==================================================== BLOCK 6A =====================================================
 
-# x.filter_signal(device_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=3)
+x.filter_signal(device_type="accelerometer", type="bandpass", low_f=1, high_f=10, filter_order=3)
 
 # ==================================================== BLOCK 6B =====================================================
 
-# x.compare_filter(device_type="hip", downsample_factor=1)
+x.compare_filter(axis='Y', device_type="hip", downsample_factor=1)
 # x.compare_filter(device_type="ankle", downsample_factor=1)
 # x.compare_filter(device_type="wrist", downsample_factor=1)
-# x.compare_filter(device_type="ankle", downsample_factor=1)
 
 # ==================================================== TIME RESET =====================================================
 # This block clearing data cropping 'memory' by resetting the timestamps ###
-"""Remove # from line 1 to apply"""
+# Remove # from line 1 to apply
 # x.start_stamp, x.stop_stamp = None, None
 
 # ==================================================== HELP ===========================================================
