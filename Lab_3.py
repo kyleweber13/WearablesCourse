@@ -40,6 +40,12 @@ class Wearables:
 
         self.rankle_inverted = False  # boolean of whether right ankle x-axis has been inverted
 
+        self.peaks_array = None
+        self.peaks_axis = "Y"
+        self.peaks_threshold_type = "normalized"
+        self.peaks_thresh = 0.7
+        self.peaks_min_dist = 250
+
         # Methods and objects that are run automatically when class instance is created -------------------------------
 
         self.df_lankle, self.lankle_samplerate = self.load_correct_file(filepath=self.lankle_fname,
@@ -196,17 +202,20 @@ class Wearables:
                 # DATA SET UP
 
                 if data_type == "lankle" and self.lankle_fname is not None:
-                    data = np.array([self.df_lankle["X"], self.df_lankle["Y"], self.df_lankle["Z"]])
+                    data = np.array([self.df_lankle["X"], self.df_lankle["Y"],
+                                     self.df_lankle["Z"], self.df_lankle["Mag"]])
                     original_df = self.df_lankle
                     fs = self.lankle_samplerate * .5
 
                 if data_type == "rankle" and self.rankle_fname is not None:
-                    data = np.array([self.df_rankle["X"], self.df_rankle["Y"], self.df_rankle["Z"]])
+                    data = np.array([self.df_rankle["X"], self.df_rankle["Y"],
+                                     self.df_rankle["Z"], self.df_rankle["Mag"]])
                     original_df = self.df_rankle
                     fs = self.rankle_samplerate * .5
 
                 if data_type == "lwrist" and self.wrist_fname is not None:
-                    data = np.array([self.df_wrist["X"], self.df_wrist["Y"], self.df_wrist["Z"]])
+                    data = np.array([self.df_wrist["X"], self.df_wrist["Y"],
+                                     self.df_wrist["Z"], self.df_wrist["Mag"]])
                     original_df = self.df_wrist
                     fs = self.wrist_samplerate * .5
 
@@ -237,424 +246,43 @@ class Wearables:
                 original_df["X_filt"] = filtered_data[0]
                 original_df["Y_filt"] = filtered_data[1]
                 original_df["Z_filt"] = filtered_data[2]
+                original_df["Mag_filt"] = np.abs(filtered_data[3])
 
         print("\nFiltering complete.")
         self.filter_run = True
 
-    def plot_data(self, start=None, stop=None, filtered=True, downsample_factor=1):
-        """Plots all data available from hip/wrist/ankle devices.
-            arguments:
-                -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS" OR integer for
-                        minutes into collection
-                -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS" OR integer for
-                        minutes into collection
-                -filtered: boolean of whether to use filtered data
-                -downsample: ratio by which data are downsampled. E.g. downsample=3 will downsample from 75 to 25 Hz
-            If start and stop are not specified, data will be cropped to one of the following:
-                -If no previous graphs have been generated, it will plot the entire data file
-                -If a previous crop has occurred, it will 'remember' that region and plot it again.
-            To clear the 'memory' of previously-plotted regions, enter "x.start_stamp=None"
-            and "x.stop_stop=None" in console
-        """
-
-        print("\n-----------------------------------------------------------------------------------------------------")
-
-        # Sets correct data to use: raw or filtered
-        if filtered:
-            print("Using filtered data.")
-            column_suffix = "_filt"
-            filter_type = "Filtered"
-
-            if not self.filter_run:
-                print("You have not filtered the data yet. Run a filter and try again!")
-                return None
-
-        if not filtered:
-            print("Using raw data.")
-            column_suffix = ""
-            filter_type = "Raw"
-
-        # Gets appropriate timestamps
-        start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
-
-        self.start_stamp = start_stamp
-        self.stop_stamp = stop_stamp
-
-        # Crops dataframes to selected region -------------------------------------------------------------------------
-        if self.hip_fname is not None:
-            # Sets stop to end of collection if stop timestamp exceeds timestamp range
-            try:
-                if stop_stamp > self.df_hip.iloc[-1]["Timestamp"]:
-                    stop_stamp = self.df_hip.iloc[-1]["Timestamp"]
-            except TypeError:
-                if datetime.strptime(stop_stamp, "%Y-%m-%d %H:%M:%S") > self.df_hip.iloc[-1]["Timestamp"]:
-                    stop_stamp = self.df_hip.iloc[-1]["Timestamp"]
-
-            df_hip = self.df_hip.loc[(self.df_hip["Timestamp"] > start_stamp) & (self.df_hip["Timestamp"] < stop_stamp)]
-
-            if data_type == "absolute":
-                df_hip["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
-                                                1 / self.hip_samplerate)[0:df_hip.shape[0]]
-
-            if downsample_factor != 1:
-                df_hip = df_hip.iloc[::downsample_factor, :]
-
-        if self.ankle_fname is not None:
-            # Sets stop to end of collection if stop timestamp exceeds timestamp range
-            try:
-                if stop_stamp > self.df_ankle.iloc[-1]["Timestamp"]:
-                    stop_stamp = self.df_ankle.iloc[-1]["Timestamp"]
-            except TypeError:
-                if datetime.strptime(stop_stamp, "%Y-%m-%d %H:%M:%S") > self.df_ankle.iloc[-1]["Timestamp"]:
-                    stop_stamp = self.df_ankle.iloc[-1]["Timestamp"]
-
-            df_ankle = self.df_ankle.loc[(self.df_ankle["Timestamp"] > start_stamp) &
-                                         (self.df_ankle["Timestamp"] < stop_stamp)]
-
-            if data_type == "absolute":
-                df_ankle["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
-                                                  1 / self.ankle_samplerate)[0:df_ankle.shape[0]]
-
-            if downsample_factor != 1:
-                df_ankle = df_ankle.iloc[::downsample_factor, :]
-
-        if self.wrist_fname is not None:
-            # Sets stop to end of collection if stop timestamp exceeds timestamp range
-            try:
-                if stop_stamp > self.df_wrist.iloc[-1]["Timestamp"]:
-                    stop_stamp = self.df_wrist.iloc[-1]["Timestamp"]
-            except TypeError:
-                if datetime.strptime(stop_stamp, "%Y-%m-%d %H:%M:%S") > self.df_wrist.iloc[-1]["Timestamp"]:
-                    stop_stamp = self.df_wrist.iloc[-1]["Timestamp"]
-
-            df_wrist = self.df_wrist.loc[(self.df_wrist["Timestamp"] > start_stamp) &
-                                         (self.df_wrist["Timestamp"] < stop_stamp)]
-
-            if data_type == "absolute":
-                df_wrist["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
-                                                  1 / self.wrist_samplerate)[0:df_wrist.shape[0]]
-
-            if downsample_factor != 1:
-                df_wrist = df_wrist.iloc[::downsample_factor, :]
-
-        # Window length in minutes
-        window_len = (stop_stamp - start_stamp).seconds / 60
-
-        print("Plotting {} minute section from {} to {}.".format(round(window_len, 2), start_stamp, stop_stamp))
-
-        # Downsampling information ------------------------------------------------------------------------------------
-        if downsample_factor != 1:
-            if self.ankle_fname is not None:
-                print("\nDownsampling {}Hz data by a factor of {}. "
-                      "New data is {}Hz.".format(self.ankle_samplerate, downsample_factor,
-                                                 round(self.ankle_samplerate / downsample_factor, 1)))
-            if self.ankle_fname is None:
-                print("\nDownsampling {}Hz data by a factor of {}. "
-                      "New data is {}Hz.".format(self.hip_samplerate, downsample_factor,
-                                                 round(self.hip_samplerate / downsample_factor, 1)))
-
-        # Gets formatting parameters based on window length
-        xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
-
-        # Plots depending on what data is available -------------------------------------------------------------------
-
-        if self.hip_fname is not None and self.ankle_fname is not None and self.wrist_fname is None:
-
-            def plot_ankle_hip():
-                fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
-                plt.subplots_adjust(bottom=bottom_plot_crop_value, hspace=.33)
-
-                ax1.set_title("{}".format(self.ankle_fname.split("/")[-1]))
-                ax1.plot(df_ankle["Timestamp"], df_ankle["X" + column_suffix],
-                         color='red', label="Ankle_X" + column_suffix)
-                ax1.plot(df_ankle["Timestamp"], df_ankle["Y" + column_suffix],
-                         color='black', label="Ankle_Y" + column_suffix)
-                ax1.plot(df_ankle["Timestamp"], df_ankle["Z" + column_suffix],
-                         color='dodgerblue', label="Ankle_Z" + column_suffix)
-                ax1.legend(loc='lower left')
-                ax1.set_ylabel("G")
-
-                ax2.set_title("{}".format(self.hip_fname.split("/")[-1]))
-                ax2.plot(df_hip["Timestamp"], df_hip["X" + column_suffix],
-                         color='red', label="Hip_X" + column_suffix)
-                ax2.plot(df_hip["Timestamp"], df_hip["Y" + column_suffix],
-                         color='black', label="Hip_Y" + column_suffix)
-                ax2.plot(df_hip["Timestamp"], df_hip["Z" + column_suffix],
-                         color='dodgerblue', label="Hip_Z" + column_suffix)
-                ax2.legend(loc='lower left')
-                ax2.set_ylabel("G")
-
-                # Timestamp axis formatting
-                if data_type == "timestamp":
-                    # xfmt = mdates.DateFormatter("%a %b %d, %H:%M")
-
-                    ax2.xaxis.set_major_formatter(xfmt)
-                    ax2.xaxis.set_major_locator(locator)
-                    plt.xticks(rotation=45, fontsize=8)
-
-                if data_type == "absolute":
-                    ax2.set_xlabel("Seconds into collection")
-
-                f_name = self.check_file_overwrite("AnkleHip{}_{} "
-                                                   "to {}.png".format(filter_type,
-                                                                      datetime.strftime(start_stamp,
-                                                                                        "%Y-%m-%d %H_%M_%S"),
-                                                                      datetime.strftime(stop_stamp,
-                                                                                        "%Y-%m-%d %H_%M_%S")))
-                plt.savefig(f_name + ".png")
-                print("Plot saved as png ({}.png)".format(f_name))
-
-            plot_ankle_hip()
-
-        if self.wrist_fname is not None and self.ankle_fname is not None and self.hip_fname is None:
-
-            def plot_ankle_wrist():
-                fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
-                plt.subplots_adjust(bottom=bottom_plot_crop_value, hspace=.33)
-
-                ax1.set_title("{}".format(self.ankle_fname.split("/")[-1]))
-                ax1.plot(df_ankle["Timestamp"], df_ankle["X" + column_suffix],
-                         color='red', label="Ankle_X" + column_suffix)
-                ax1.plot(df_ankle["Timestamp"], df_ankle["Y" + column_suffix],
-                         color='black', label="Ankle_Y" + column_suffix)
-                ax1.plot(df_ankle["Timestamp"], df_ankle["Z" + column_suffix],
-                         color='dodgerblue', label="Ankle_Z" + column_suffix)
-                ax1.legend(loc='lower left')
-                ax1.set_ylabel("G")
-
-                ax2.set_title("{}".format(self.wrist_fname.split("/")[-1]))
-                ax2.plot(df_wrist["Timestamp"], df_wrist["X" + column_suffix],
-                         color='red', label="Wrist_X" + column_suffix)
-                ax2.plot(df_wrist["Timestamp"], df_wrist["Y" + column_suffix],
-                         color='black', label="Wrist_Y" + column_suffix)
-                ax2.plot(df_wrist["Timestamp"], df_wrist["Z" + column_suffix],
-                         color='dodgerblue', label="Wrist_Z" + column_suffix)
-                ax2.legend(loc='lower left')
-                ax2.set_ylabel("G")
-
-                # Timestamp axis formatting
-                if data_type == "timestamp":
-                    xfmt = mdates.DateFormatter("%a %b %d, %H:%M")
-
-                    ax2.xaxis.set_major_formatter(xfmt)
-                    ax2.xaxis.set_major_locator(locator)
-                    plt.xticks(rotation=45, fontsize=8)
-
-                if data_type == "absolute":
-                    ax2.set_xlabel("Seconds into collection")
-
-                f_name = self.check_file_overwrite("AnkleWrist{}_{} "
-                                                   "to {}.png".format(filter_type,
-                                                                      datetime.strftime(start_stamp,
-                                                                                        "%Y-%m-%d %H_%M_%S"),
-                                                                      datetime.strftime(stop_stamp,
-                                                                                        "%Y-%m-%d %H_%M_%S")))
-                plt.savefig(f_name + ".png")
-                print("Plot saved as png ({}.png)".format(f_name))
-
-            plot_ankle_wrist()
-
-        if self.wrist_fname is not None and self.ankle_fname is not None and self.hip_fname is not None:
-
-            def plot_all():
-                fig, (ax1, ax2, ax3) = plt.subplots(3, sharex='col', figsize=(self.fig_width, self.fig_height))
-                plt.subplots_adjust(bottom=bottom_plot_crop_value, hspace=.33)
-
-                ax1.set_title("{}".format(self.ankle_fname.split("/")[-1]))
-                ax1.plot(df_ankle["Timestamp"], df_ankle["X" + column_suffix],
-                         color='red', label="Ankle_X" + column_suffix)
-                ax1.plot(df_ankle["Timestamp"], df_ankle["Y" + column_suffix],
-                         color='black', label="Ankle_Y" + column_suffix)
-                ax1.plot(df_ankle["Timestamp"], df_ankle["Z" + column_suffix],
-                         color='dodgerblue', label="Ankle_Z" + column_suffix)
-                ax1.legend(loc='lower left')
-                ax1.set_ylabel("G")
-
-                ax2.set_title("{}".format(self.wrist_fname.split("/")[-1]))
-                ax2.plot(df_wrist["Timestamp"], df_wrist["X" + column_suffix],
-                         color='red', label="Wrist_X" + column_suffix)
-                ax2.plot(df_wrist["Timestamp"], df_wrist["Y" + column_suffix],
-                         color='black', label="Wrist_Y" + column_suffix)
-                ax2.plot(df_wrist["Timestamp"], df_wrist["Z" + column_suffix],
-                         color='dodgerblue', label="Wrist_Z" + column_suffix)
-                ax2.legend(loc='lower left')
-                ax2.set_ylabel("G")
-
-                ax3.set_title("{}".format(self.wrist_fname.split("/")[-1]))
-                ax3.plot(df_hip["Timestamp"], df_hip["X" + column_suffix],
-                         color='red', label="Hip_X" + column_suffix)
-                ax3.plot(df_hip["Timestamp"], df_hip["Y" + column_suffix],
-                         color='black', label="Hip_Y" + column_suffix)
-                ax3.plot(df_hip["Timestamp"], df_hip["Z" + column_suffix],
-                         color='dodgerblue', label="Hip_Z" + column_suffix)
-                ax3.legend(loc='lower left')
-                ax3.set_ylabel("G")
-
-                # Timestamp axis formatting
-                if data_type == "timestamp":
-                    # xfmt = mdates.DateFormatter("%a %b %d, %H:%M")
-
-                    ax3.xaxis.set_major_formatter(xfmt)
-                    ax3.xaxis.set_major_locator(locator)
-                    plt.xticks(rotation=45, fontsize=8)
-
-                if data_type == "absolute":
-                    ax3.set_xlabel("Seconds into collection")
-
-                f_name = self.check_file_overwrite("AllAccels{}_{} "
-                                                   "to {}.png".format(filter_type,
-                                                                      datetime.strftime(start_stamp,
-                                                                                        "%Y-%m-%d %H_%M_%S"),
-                                                                      datetime.strftime(stop_stamp,
-                                                                                        "%Y-%m-%d %H_%M_%S")))
-                plt.savefig(f_name + ".png")
-                print("Plot saved as png ({}.png)".format(f_name))
-
-            plot_all()
-
-    def compare_filter(self, axis="all", device_type=None, start=None, stop=None, downsample_factor=1):
-        """Plots raw and filtered data on separate subplots.
-        arguments:
-            -axis: which accelerometer axis/axes to plot. "all", "x", "y", or "z"
-            -device_type: "hip" or "ankle" --> which device to plot
-            -start: timestamp for start of region. Format = "YYYY-MM-DD HH:MM:SS"
-            -stop: timestamp for end of region. Format = "YYYY-MM-DD HH:MM:SS"
-            -downsample_factor: ratio by which data are downsampled. E.g. downsample=3 will downsample from 75 to 25 Hz
-        If start and stop are not specified, data will be cropped to one of the following:
-            -If no previous graphs have been generated, it will plot the entire data file
-            -If a previous crop has occurred, it will 'remember' that region and plot it again.
-        To clear the 'memory' of previously-plotted regions, enter "x.start_stamp=None"
-        and "x.stop_stop=None" in console
-        """
-
-        print("\n-----------------------------------------------------------------------------------------------------")
-
-        # Sets which data to use
-        if device_type == "hip" or device_type == "Hip":
-            df = self.df_hip
-            fs = self.hip_samplerate
-
-        if device_type == "ankle" or device_type == "Ankle":
-            df = self.df_ankle
-            fs = self.ankle_samplerate
-
-        if device_type == "wrist" or device_type == "Wrist":
-            df = self.df_wrist
-            fs = self.wrist_samplerate
-
-        # Gets appropriate timestamps
-        start, stop, data_type = self.get_timestamps(start, stop)
-
-        # Sets 'memory' values to current start/stop values
-        self.start_stamp = start
-        self.stop_stamp = stop
-
-        # Crops dataframes to selected region
-        df = df.loc[(df["Timestamp"] > start) & (df["Timestamp"] < stop)]
-
-        # Downsamples data
-        if downsample_factor != 1:
-            df = df.iloc[::downsample_factor, :]
-
-            if device_type == "hip" or device_type == "Hip":
-                print("\nDownsampling {}Hz data by a factor of {}. "
-                      "New data is {}Hz.".format(self.hip_samplerate, downsample_factor,
-                                                 round(self.hip_samplerate / downsample_factor, 1)))
-
-            if device_type == "ankle" or device_type == "Ankle":
-                print("\nDownsampling {}Hz data by a factor of {}. "
-                      "New data is {}Hz.".format(self.ankle_samplerate, downsample_factor,
-                                                 round(self.ankle_samplerate / downsample_factor, 1)))
-
-            if device_type == "wrist" or device_type == "Wrist":
-                print("\nDownsampling {}Hz data by a factor of {}. "
-                      "New data is {}Hz.".format(self.wrist_samplerate, downsample_factor,
-                                                 round(self.wrist_samplerate / downsample_factor, 1)))
-        # Window length in minutes
-        try:
-            window_len = (stop - start).seconds / 60
-        except TypeError:
-            window_len = (datetime.strptime(stop, "%Y-%m-%d %H:%M:%S") -
-                          datetime.strptime(start, "%Y-%m-%d %H:%M:%S")).seconds / 60
-
-        if data_type == "absolute":
-            df["Timestamp"] = np.arange(0, (stop - start).seconds, 1 / fs)[0:df.shape[0]]
-
-        print("Plotting {} data: {} minute section from {} to {}.".format(device_type,
-                                                                          round(window_len, 2),
-                                                                          start, stop))
-
-        # Formatting x-axis ticks ------------------------------------------------------------------------------------
-        xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
-
-        # Generates ~15 ticks (1/15th of window length apart)
-        locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
-
-        # ACCELEROMETER PLOTTING -------------------------------------------------------------------------------------
-        if device_type != "ECG" and device_type != "ecg":
-            fig, (ax1, ax2) = plt.subplots(2, 1, sharex='col', figsize=(self.fig_width, self.fig_height))
-            plt.subplots_adjust(bottom=.17, hspace=.33)
-
-            ax1.set_title("Raw data")
-            if axis == "all" or axis == "All" or axis == "x" or axis == "X":
-                ax1.plot(df["Timestamp"], df["X"], label="X", color='red')
-
-            if axis == "all" or axis == "All" or axis == "y" or axis == "Y":
-                ax1.plot(df["Timestamp"], df["Y"], label="Y", color='black')
-
-            if axis == "all" or axis == "All" or axis == "z" or axis == "Z":
-                ax1.plot(df["Timestamp"], df["Z"], label="Z", color='dodgerblue')
-
-            ax1.set_ylabel("G's")
-            ax1.legend(loc='lower left')
-
-            if self.filter_run:
-                ax2.set_title("Filtered data")
-
-                if axis == "all" or axis == "All" or axis == "x" or axis == "X":
-                    ax2.plot(df["Timestamp"], df["X_filt"], label="X_filt", color='red')
-                if axis == "all" or axis == "All" or axis == "y" or axis == "Y":
-                    ax2.plot(df["Timestamp"], df["Y_filt"], label="Y_filt", color='black')
-                if axis == "all" or axis == "All" or axis == "z" or axis == "Z":
-                    ax2.plot(df["Timestamp"], df["Z_filt"], label="Z_filt", color='dodgerblue')
-            if not self.filter_run:
-                print("No filter has been run. Run a filter and try again.")
-
-            ax2.set_ylabel("G's")
-            ax2.legend(loc='lower left')
-
-            if data_type == "timestamp":
-                ax2.xaxis.set_major_formatter(xfmt)
-                ax2.xaxis.set_major_locator(locator)
-            if data_type == "absolute":
-                ax2.set_xlabel("Seconds into collection")
-
-        # ECG PLOTTING -----------------------------------------------------------------------------------------------
-        if device_type == "ECG" or device_type == "ecg":
-            fig, ax1 = plt.subplots(1, figsize=(self.fig_width, self.fig_height))
-
-            ax1.set_title("Raw and Filtered ({}-{} Hz bandpass) ECG data".format(self.ecg_filter_freq_l,
-                                                                                 self.ecg_filter_freq_h))
-            ax1.plot(df["Timestamp"], df["Raw"], color='red', label="Raw")
-            ax1.plot(df["Timestamp"], df["Filtered"], color='black', label="Filtered")
-            ax1.legend(loc='best')
-            ax1.set_ylabel("Voltage")
-
-        if data_type == "timestamp":
-            ax1.xaxis.set_major_formatter(xfmt)
-            ax1.xaxis.set_major_locator(locator)
-        if data_type == "absolute":
-            ax1.set_xlabel("Seconds into collection")
-
-        plt.xticks(rotation=45, fontsize=8)
-
-        plt.savefig("{}_RawAndFiltered_{}Axis_{} to {}.png".format(device_type.capitalize(), axis,
-                                                                   datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
-                                                                   datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
-        print("Plot saved as png ({}_RawAndFiltered_{}Axis"
-              "_{} to {}.png)".format(device_type.capitalize(), axis,
-                                      datetime.strftime(start, "%Y-%m-%d %H-%M-%S"),
-                                      datetime.strftime(stop, "%Y-%m-%d %H-%M-%S")))
+    def find_peaks(self, min_dist_ms=250, thresh_type="normalized", threshold=0.7, axis="y"):
+
+        print("\nDetecting peaks using the following parameters:")
+        print("-Detecting peaks using {} data".format(axis.capitalize()))
+        print("-Minimum distance between peaks = {} ms".format(min_dist_ms))
+        print("-Threshold type = {}".format(thresh_type))
+        if thresh_type == "normalized":
+            print("-Threshold = {}% of signal amplitude".format(threshold*100))
+        if thresh_type == "absolute":
+            print("-Threshod = {} G".format(threshold))
+
+        if not self.filter_run:
+            print("\nPlease run filter and try again.")
+            return None
+
+        lankle_peaks = peakutils.indexes(y=self.df_lankle["{}_filt".format(axis.capitalize())],
+                                         min_dist=int(self.lankle_samplerate/(1000/min_dist_ms)),
+                                         thres_abs=False if thresh_type == "normalized" else True, thres=threshold)
+
+        rankle_peaks = peakutils.indexes(y=self.df_rankle["{}_filt".format(axis.capitalize())],
+                                         min_dist=int(self.rankle_samplerate/(1000/min_dist_ms)),
+                                         thres_abs=False if thresh_type == "normalized" else True, thres=threshold)
+
+        wrist_peaks = peakutils.indexes(y=self.df_wrist["{}_filt".format(axis.capitalize())],
+                                        min_dist=int(self.wrist_samplerate/(1000/min_dist_ms)),
+                                        thres_abs=False if thresh_type == "normalized" else True, thres=threshold)
+
+        self.peaks_array = np.array([lankle_peaks, rankle_peaks, wrist_peaks])
+        self.peaks_axis = axis
+        self.peaks_threshold_type = thresh_type
+        self.peaks_thresh = threshold
+        self.peaks_min_dist = min_dist_ms
 
     def get_timestamps(self, start=None, stop=None):
 
@@ -876,7 +504,7 @@ class Wearables:
 
         # Plotting ---------------------------------------------------------------------------------------------------
 
-        fig, (ax1, ax2, ax3) = plt.subplots(3, sharex="col", figsize=(self.fig_width, self.fig_height))
+        fig, (ax1, ax2, ax3) = plt.subplots(3, sharex="col", sharey='col', figsize=(self.fig_width, self.fig_height))
 
         ax1.plot(df_lankle["Timestamp"], df_lankle["X_filt"], color='black', label="LA_x")
         ax1.plot(df_rankle["Timestamp"], df_rankle["X"], color='red', label="RA_x")
@@ -897,10 +525,152 @@ class Wearables:
         ax3.xaxis.set_major_locator(locator)
         plt.xticks(rotation=45, fontsize=8)
 
+    def plot_all_data(self, start=None, stop=None, downsample_factor=1, axis="x"):
+
+        if not self.filter_run:
+            print("\nPlease filter data and try again.")
+            return None
+
+        # Plot set up ------------------------------------------------------------------------------------------------
+        start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
+        window_len = (stop_stamp - start_stamp).seconds / 60
+        xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
+
+        # Sets stop to end of collection if stop timestamp exceeds timestamp range
+        try:
+            if stop_stamp > self.df_lankle.iloc[-1]["Timestamp"]:
+                stop_stamp = self.df_lankle.iloc[-1]["Timestamp"]
+        except TypeError:
+            if datetime.strptime(stop_stamp, "%Y-%m-%d %H:%M:%S") > self.df_lankle.iloc[-1]["Timestamp"]:
+                stop_stamp = self.df_lankle.iloc[-1]["Timestamp"]
+
+        df_lankle = self.df_lankle.loc[(self.df_lankle["Timestamp"] > start_stamp) &
+                                       (self.df_lankle["Timestamp"] < stop_stamp)]
+        df_rankle = self.df_rankle.loc[(self.df_rankle["Timestamp"] > start_stamp) &
+                                       (self.df_rankle["Timestamp"] < stop_stamp)]
+        df_wrist = self.df_wrist.loc[(self.df_wrist["Timestamp"] > start_stamp) &
+                                       (self.df_wrist["Timestamp"] < stop_stamp)]
+
+        if data_type == "absolute":
+            df_lankle["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
+                                               1 / self.df_lankle)[0:df_lankle.shape[0]]
+            df_rankle["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
+                                               1 / self.df_rankle)[0:df_rankle.shape[0]]
+            df_wrist["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
+                                              1 / self.df_wrist)[0:df_wrist.shape[0]]
+
+        if downsample_factor != 1:
+            df_lankle = df_lankle.iloc[::downsample_factor, :]
+            df_rankle = df_rankle.iloc[::downsample_factor, :]
+            df_wrist = df_wrist.iloc[::downsample_factor, :]
+
+        # Plotting ----------------------------------------------------------------------------------------------------
+        fig, (ax1, ax2) = plt.subplots(2, sharex='col', sharey='col', figsize=(self.fig_width, self.fig_height))
+
+        ax1.plot(df_lankle["Timestamp"], df_lankle["{}_filt".format(axis.capitalize())],
+                 color='black', label="LA_{}".format(axis.capitalize()))
+        ax1.plot(df_rankle["Timestamp"], df_rankle["{}_filt".format(axis.capitalize())],
+                 color='black', label="RA_{}".format(axis.capitalize()))
+        ax1.set_ylabel("G")
+        ax1.legend()
+
+        ax2.plot(df_wrist["Timestamp"], df_wrist["{}_filt".format(axis.capitalize())],
+                 color="blue", label="Wrist_{}".format(axis.capitalize()))
+        ax2.set_ylabel("G")
+        ax2.legend()
+
+        ax2.xaxis.set_major_formatter(xfmt)
+        ax2.xaxis.set_major_locator(locator)
+        plt.xticks(rotation=45, fontsize=8)
+
+    def plot_detected_peaks(self, start=None, stop=None):
+
+        if not self.filter_run:
+            print("\nPlease filter data and try again.")
+            return None
+
+        if self.peaks_array is None:
+            print("\nNo peaks have been detected. Run x.find_peaks() first and then try again.")
+            return None
+
+        # Plot set up ------------------------------------------------------------------------------------------------
+        start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
+        window_len = (stop_stamp - start_stamp).seconds / 60
+        xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
+
+        # Sets stop to end of collection if stop timestamp exceeds timestamp range
+        try:
+            if stop_stamp > self.df_lankle.iloc[-1]["Timestamp"]:
+                stop_stamp = self.df_lankle.iloc[-1]["Timestamp"]
+        except TypeError:
+            if datetime.strptime(stop_stamp, "%Y-%m-%d %H:%M:%S") > self.df_lankle.iloc[-1]["Timestamp"]:
+                stop_stamp = self.df_lankle.iloc[-1]["Timestamp"]
+
+        df_lankle = self.df_lankle.loc[(self.df_lankle["Timestamp"] > start_stamp) &
+                                       (self.df_lankle["Timestamp"] < stop_stamp)]
+        df_rankle = self.df_rankle.loc[(self.df_rankle["Timestamp"] > start_stamp) &
+                                       (self.df_rankle["Timestamp"] < stop_stamp)]
+        df_wrist = self.df_wrist.loc[(self.df_wrist["Timestamp"] > start_stamp) &
+                                       (self.df_wrist["Timestamp"] < stop_stamp)]
+
+        # Finds which datapoint corresponds to start of cropped df. Needed to adjust peak indexes.
+        start_offset = self.df_lankle.loc[self.df_lankle["Timestamp"] >= start_stamp].index[0]
+        end_offset = self.df_lankle.loc[self.df_lankle["Timestamp"] >= stop_stamp].index[0]
+
+        if data_type == "absolute":
+            df_lankle["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
+                                               1 / self.df_lankle)[0:df_lankle.shape[0]]
+            df_rankle["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
+                                               1 / self.df_rankle)[0:df_rankle.shape[0]]
+            df_wrist["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
+                                              1 / self.df_wrist)[0:df_wrist.shape[0]]
+
+        # Plotting ----------------------------------------------------------------------------------------------------
+        fig, (ax1, ax2, ax3) = plt.subplots(3, sharex="col", figsize=(self.fig_width, self.fig_height))
+        plt.subplots_adjust(bottom=bottom_plot_crop_value)
+
+        plt.suptitle("{} data ({} threshold of {}, min_dist = {}ms)".format(self.peaks_axis.capitalize(),
+                                                                            self.peaks_threshold_type,
+                                                                            self.peaks_thresh, self.peaks_min_dist))
+
+        ax1.plot(df_lankle["Timestamp"], df_lankle["{}_filt".format(self.peaks_axis.capitalize())],
+                 color='black', label="LA_{} ({} peaks)".format(self.peaks_axis, len(self.peaks_array[0])))
+        ax1.plot([self.df_lankle["Timestamp"].iloc[i] for i in self.peaks_array[0] if start_offset <= i <= end_offset],
+                 [self.df_lankle["{}_filt".format(self.peaks_axis.capitalize())].iloc[i] for
+                  i in self.peaks_array[0] if start_offset <= i <= end_offset],
+                 linestyle="", color='red', marker="x")
+        ax1.set_ylabel("G")
+        ax1.legend()
+
+        ax2.plot(df_rankle["Timestamp"], df_rankle["{}_filt".format(self.peaks_axis.capitalize())],
+                 color='red', label="RA_{} ({} peaks)".format(self.peaks_axis, len(self.peaks_array[1])))
+        ax2.plot([self.df_lankle["Timestamp"].iloc[i] for i in self.peaks_array[0] if start_offset <= i <= end_offset],
+                 [self.df_rankle["{}_filt".format(self.peaks_axis.capitalize())].iloc[i] for
+                  i in self.peaks_array[1] if start_offset <= i <= end_offset],
+                 linestyle="", color='black', marker="x")
+        ax2.set_ylabel("G")
+        ax2.legend()
+
+        ax3.plot(df_wrist["Timestamp"], df_wrist["{}_filt".format(self.peaks_axis.capitalize())],
+                 color='blue', label="LW_{} ({} peaks)".format(self.peaks_axis, len(self.peaks_array[2])))
+        ax3.plot([self.df_wrist["Timestamp"].iloc[i] for i in self.peaks_array[2] if start_offset <= i <= end_offset],
+                 [self.df_wrist["{}_filt".format(self.peaks_axis.capitalize())].iloc[i] for
+                  i in self.peaks_array[2] if start_offset <= i <= end_offset],
+                 linestyle="", color='black', marker="x")
+        ax3.set_ylabel("G")
+        ax3.legend()
+
+        ax3.xaxis.set_major_formatter(xfmt)
+        ax3.xaxis.set_major_locator(locator)
+        plt.xticks(rotation=45, fontsize=8)
+
 
 x = Wearables(leftankle_filepath="Lab2_Ankle.csv", rightankle_filepath="Lab2_Ankle.csv",
               leftwrist_filepath="Lab2_Wrist.csv")
 x.filter_signal(device_type="accelerometer", type="bandpass", low_f=0.5, high_f=10, filter_order=3)
 # x.plot_ankles_x()
-x.plot_ankle_data()
+# x.plot_ankle_data()
 # CHANGE x.plot_ankle_data() TO BE ALL FILTERED
+# x.plot_all_data(axis="Y")
+x.find_peaks(min_dist_ms=300, thresh_type="normalized", threshold=.7, axis="x")
+x.plot_detected_peaks(start="2020-08-24 13:09:25.0", stop="2020-08-24 13:10:32.0")
