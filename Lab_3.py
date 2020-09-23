@@ -54,6 +54,10 @@ class Wearables:
                                                                       f_type="Left Ankle")
         self.df_rankle, self.rankle_samplerate = self.load_correct_file(filepath=self.rankle_fname,
                                                                       f_type="Right Ankle")
+
+        # Inverts x-axis data so it matches left ankle
+        self.df_rankle["X"] = -self.df_rankle["X"]
+
         self.df_wrist, self.wrist_samplerate = self.load_correct_file(filepath=self.wrist_fname,
                                                                       f_type="Left Wrist")
 
@@ -267,7 +271,7 @@ class Wearables:
         between 0 and 1; this represents the fraction of the signal range to use as the threshold. If thresh_type ==
         "absolute", threshold can be any value that corresponds to the threshold in G's
         -axis: which accelerometer data to use; "x", "y", "z", or "mag" (vector magnitude)
-
+        -show_plot: boolean to plot data or not
         """
 
         print("\nDetecting peaks using the following parameters:")
@@ -396,7 +400,7 @@ class Wearables:
                 version = 1
             print("File already exists.")
             print("Saving new file as {}".format(filename.split(".")[0] + "_Version{}.png".format(version)))
-            return filename.split(".")[0] + "_Version{}".format(version)
+            return filename.split(".")[0] + "_Version{}.png".format(version)
         if not file_exists:
             return filename
 
@@ -425,7 +429,7 @@ class Wearables:
 
         return xfmt, locator, bottom_plot_crop_value
 
-    def plot_ankles_x(self, start=None, stop=None, downsample_factor=1):
+    def plot_ankles_x(self, start=None, stop=None, downsample_factor=1, use_filtered=False):
         """Generates two subplots for x-axis accleration data.
            Top: original left and right ankle data. Bottom: original left ankle data and inverted right ankle data.
 
@@ -458,43 +462,37 @@ class Wearables:
                                        (self.df_lankle["Timestamp"] < stop_stamp)]
         df_rankle = self.df_rankle.loc[(self.df_rankle["Timestamp"] > start_stamp) &
                                        (self.df_rankle["Timestamp"] < stop_stamp)]
-        df_wrist = self.df_wrist.loc[(self.df_wrist["Timestamp"] > start_stamp) &
-                                      (self.df_wrist["Timestamp"] < stop_stamp)]
 
         if data_type == "absolute":
             df_lankle["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
                                                1 / self.df_lankle)[0:df_lankle.shape[0]]
             df_rankle["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
                                                1 / self.df_rankle)[0:df_rankle.shape[0]]
-            df_wrist["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
-                                              1 / self.df_wrist)[0:df_wrist.shape[0]]
+
         if downsample_factor != 1:
             df_lankle = df_lankle.iloc[::downsample_factor, :]
             df_rankle = df_rankle.iloc[::downsample_factor, :]
-            df_wrist = df_wrist.iloc[::downsample_factor, :]
 
         # Plotting ---------------------------------------------------------------------------------------------------
+        if use_filtered:
+            col_name_suff = "_filt"
+        if not use_filtered:
+            col_name_suff = ""
+
         fig, (ax1, ax2) = plt.subplots(2, sharex="col", figsize=(self.fig_width, self.fig_height))
         plt.subplots_adjust(bottom=bottom_plot_crop_value)
 
-        ax1.set_title("Original Data")
-        ax1.plot(df_lankle["Timestamp"], df_lankle["X"], color='black', label="LAnkle_X")
+        ax1.set_title("Original Data (filtered = {})".format(use_filtered))
+        ax1.plot(df_lankle["Timestamp"], df_lankle["X" + col_name_suff], color='black', label="LAnkle_X")
 
-        if not self.rankle_inverted:
-            ax1.plot(df_rankle["Timestamp"], df_rankle["X"], color='red', label="RAnkle_X")
-        if self.rankle_inverted:
-            ax1.plot(df_rankle["Timestamp"], -df_rankle["X"], color='red', label="RAnkle_X")
+        ax1.plot(df_rankle["Timestamp"], -df_rankle["X" + col_name_suff], color='red', label="RAnkle_X")
         ax1.set_xlim(x_lim)
         ax1.set_ylabel("G")
         ax1.legend(loc='upper left')
 
         ax2.set_title("Right Ankle Inverted X-Axis")
-        ax2.plot(df_lankle["Timestamp"], df_lankle["X"], color='black', label="LAnkle_X")
-
-        if not self.rankle_inverted:
-            ax2.plot(df_rankle["Timestamp"], -df_rankle["X"], color='red', label="Negative RAnkle_X")
-        if self.rankle_inverted:
-            ax2.plot(df_rankle["Timestamp"], df_rankle["X"], color='red', label="Negative RAnkle_X")
+        ax2.plot(df_lankle["Timestamp"], df_lankle["X" + col_name_suff], color='black', label="LAnkle_X")
+        ax2.plot(df_rankle["Timestamp"], df_rankle["X" + col_name_suff], color='red', label="Negative RAnkle_X")
         ax2.set_xlim(x_lim)
         ax2.set_ylabel("G")
         ax2.legend(loc='upper left')
@@ -502,10 +500,6 @@ class Wearables:
         ax2.xaxis.set_major_formatter(xfmt)
         ax2.xaxis.set_major_locator(locator)
         plt.xticks(rotation=45, fontsize=8)
-
-        print("\nInverting x-axis on Right Ankle to avoid further confusion.")
-        self.df_rankle["X"] = self.df_rankle["X"]
-        self.rankle_inverted = not self.rankle_inverted
 
     def plot_ankle_data(self, start=None, stop=None, downsample_factor=1):
         """Generates plot of right and left ankle data. One subplot for each axis (x, y, z) with both ankles
@@ -751,16 +745,27 @@ class Wearables:
         ax3.xaxis.set_major_locator(locator)
         plt.xticks(rotation=45, fontsize=8)
 
+        f_name = self.check_file_overwrite("DetectedPeaks_{}Thresh_{}Axis_{}ms_{} "
+                                           "to {}".format(self.peaks_threshold_type.capitalize(),
+                                                          self.peaks_axis.capitalize(), self.peaks_min_dist,
+                                                          datetime.strftime(start_stamp,
+                                                                            "%Y-%m-%d %H_%M_%S"),
+                                                          datetime.strftime(stop_stamp,
+                                                                            "%Y-%m-%d %H_%M_%S")))
+        plt.savefig(f_name)
+        print("Plot saved as png ({})".format(f_name))
+
     def compare_walk_and_run(self):
 
         pass
 
 
-x = Wearables(leftankle_filepath="Lab4_LAnkle.csv", rightankle_filepath="Lab4_RAnkle.csv",
-              leftwrist_filepath="Lab4_LWrist.csv")
+x = Wearables(leftankle_filepath="Data Files/Labs3and4_LAnkle.csv",
+              rightankle_filepath="Data Files/Labs3and4_RAnkle.csv",
+              leftwrist_filepath="Data Files/Labs3and4_LWrist_1.csv")
 x.filter_signal(device_type="accelerometer", type="bandpass", low_f=0.5, high_f=10, filter_order=3)
-# x.plot_ankles_x()
+# x.plot_ankles_x(use_filtered=False)
 # x.plot_ankle_data()
-# x.plot_all_data(axis="y")
-# x.find_peaks(min_dist_ms=300, thresh_type="normalized", threshold=.7, axis="x")
+# x.plot_all_data(axis="mag")
+# x.find_peaks(min_dist_ms=300, thresh_type="absolute", threshold=1.5, axis="x")
 # x.plot_detected_peaks()
