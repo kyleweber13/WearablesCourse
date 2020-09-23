@@ -438,6 +438,14 @@ class Wearables:
         window_len = (stop_stamp - start_stamp).seconds / 60
         xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
 
+        # Sets 'memory' values to current start/stop values
+        self.start_stamp = start_stamp
+        self.stop_stamp = stop_stamp
+
+        # Sets xlim so legend shouldn't overlap any data
+        buffer_len = window_len / 8
+        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=1))
+
         # Sets stop to end of collection if stop timestamp exceeds timestamp range
         try:
             if stop_stamp > self.df_lankle.iloc[-1]["Timestamp"]:
@@ -447,11 +455,11 @@ class Wearables:
                 stop_stamp = self.df_lankle.iloc[-1]["Timestamp"]
 
         df_lankle = self.df_lankle.loc[(self.df_lankle["Timestamp"] > start_stamp) &
-                                    (self.df_lankle["Timestamp"] < stop_stamp)]
+                                       (self.df_lankle["Timestamp"] < stop_stamp)]
         df_rankle = self.df_rankle.loc[(self.df_rankle["Timestamp"] > start_stamp) &
-                                    (self.df_rankle["Timestamp"] < stop_stamp)]
-        df_wrist = self.df_rankle.loc[(self.df_wrist["Timestamp"] > start_stamp) &
-                                    (self.df_wrist["Timestamp"] < stop_stamp)]
+                                       (self.df_rankle["Timestamp"] < stop_stamp)]
+        df_wrist = self.df_wrist.loc[(self.df_wrist["Timestamp"] > start_stamp) &
+                                      (self.df_wrist["Timestamp"] < stop_stamp)]
 
         if data_type == "absolute":
             df_lankle["Timestamp"] = np.arange(0, (stop_stamp - start_stamp).seconds,
@@ -476,9 +484,9 @@ class Wearables:
             ax1.plot(df_rankle["Timestamp"], df_rankle["X"], color='red', label="RAnkle_X")
         if self.rankle_inverted:
             ax1.plot(df_rankle["Timestamp"], -df_rankle["X"], color='red', label="RAnkle_X")
-
+        ax1.set_xlim(x_lim)
         ax1.set_ylabel("G")
-        ax1.legend()
+        ax1.legend(loc='upper left')
 
         ax2.set_title("Right Ankle Inverted X-Axis")
         ax2.plot(df_lankle["Timestamp"], df_lankle["X"], color='black', label="LAnkle_X")
@@ -487,8 +495,9 @@ class Wearables:
             ax2.plot(df_rankle["Timestamp"], -df_rankle["X"], color='red', label="Negative RAnkle_X")
         if self.rankle_inverted:
             ax2.plot(df_rankle["Timestamp"], df_rankle["X"], color='red', label="Negative RAnkle_X")
+        ax2.set_xlim(x_lim)
         ax2.set_ylabel("G")
-        ax2.legend()
+        ax2.legend(loc='upper left')
 
         ax2.xaxis.set_major_formatter(xfmt)
         ax2.xaxis.set_major_locator(locator)
@@ -509,6 +518,14 @@ class Wearables:
         start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
         window_len = (stop_stamp - start_stamp).seconds / 60
         xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
+
+        # Sets 'memory' values to current start/stop values
+        self.start_stamp = start_stamp
+        self.stop_stamp = stop_stamp
+
+        # Sets xlim so legend shouldn't overlap any data
+        buffer_len = window_len / 8
+        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=1))
 
         # Sets stop to end of collection if stop timestamp exceeds timestamp range
         try:
@@ -539,17 +556,20 @@ class Wearables:
         ax1.plot(df_lankle["Timestamp"], df_lankle["X_filt"], color='black', label="LA_x")
         ax1.plot(df_rankle["Timestamp"], df_rankle["X_filt"], color='red', label="RA_x")
         ax1.set_ylabel("G")
-        ax1.legend()
+        ax1.legend(loc='upper left')
+        ax1.set_xlim(x_lim)
 
         ax2.plot(df_lankle["Timestamp"], df_lankle["Y_filt"], color='black', label="LA_y")
         ax2.plot(df_rankle["Timestamp"], df_rankle["Y_filt"], color='red', label="RA_y")
         ax2.set_ylabel("G")
-        ax2.legend()
+        ax2.legend(loc='upper left')
+        ax2.set_xlim(x_lim)
 
         ax3.plot(df_lankle["Timestamp"], df_lankle["Z_filt"], color='black', label="LA_z")
         ax3.plot(df_rankle["Timestamp"], df_rankle["Z_filt"], color='red', label="RA_z")
         ax3.set_ylabel("G")
-        ax3.legend()
+        ax3.legend(loc='upper left')
+        ax3.set_xlim(x_lim)
 
         ax3.xaxis.set_major_formatter(xfmt)
         ax3.xaxis.set_major_locator(locator)
@@ -568,6 +588,14 @@ class Wearables:
         start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
         window_len = (stop_stamp - start_stamp).seconds / 60
         xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
+
+        # Sets 'memory' values to current start/stop values
+        self.start_stamp = start_stamp
+        self.stop_stamp = stop_stamp
+
+        # Sets xlim so legend shouldn't overlap any data
+        buffer_len = window_len / 8
+        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=1))
 
         # Sets stop to end of collection if stop timestamp exceeds timestamp range
         try:
@@ -606,12 +634,14 @@ class Wearables:
         ax1.plot(df_rankle["Timestamp"], df_rankle["{}_filt".format(axis.capitalize())],
                  color='red', label="RA_{}".format(axis.capitalize()))
         ax1.set_ylabel("G")
-        ax1.legend()
+        ax1.legend(loc='upper left')
+        ax1.set_xlim(x_lim)
 
         ax2.plot(df_wrist["Timestamp"], df_wrist["{}_filt".format(axis.capitalize())],
                  color="blue", label="Wrist_{}".format(axis.capitalize()))
         ax2.set_ylabel("G")
-        ax2.legend()
+        ax2.legend(loc='upper left')
+        ax2.set_xlim(x_lim)
 
         ax2.xaxis.set_major_formatter(xfmt)
         ax2.xaxis.set_major_locator(locator)
@@ -634,6 +664,14 @@ class Wearables:
         start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
         window_len = (stop_stamp - start_stamp).seconds / 60
         xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
+
+        # Sets 'memory' values to current start/stop values
+        self.start_stamp = start_stamp
+        self.stop_stamp = stop_stamp
+
+        # Sets xlim so legend shouldn't overlap any data
+        buffer_len = window_len / 8
+        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=1))
 
         # Sets stop to end of collection if stop timestamp exceeds timestamp range
         try:
@@ -672,7 +710,7 @@ class Wearables:
 
         # Left Ankle -------------------------------------------------------------------------------------------------
         ax1.plot(df_lankle["Timestamp"], df_lankle["{}_filt".format(self.peaks_axis.capitalize())],
-                 color='black', label="LA_{} ({} peaks)".format(self.peaks_axis, len(self.peaks_array[0])))
+                 color='black', label="LA_{}".format(self.peaks_axis))
         if len(self.peaks_array[0]) > 0:
             ax1.plot([self.df_lankle["Timestamp"].iloc[i] for i in self.peaks_array[0] if
                       start_offset <= i <= end_offset],
@@ -680,11 +718,12 @@ class Wearables:
                       i in self.peaks_array[0] if start_offset <= i <= end_offset],
                      linestyle="", color='red', marker="x")
         ax1.set_ylabel("G")
-        ax1.legend()
+        ax1.legend(loc='upper left')
+        ax1.set_xlim(x_lim)
 
         # Right Ankle -------------------------------------------------------------------------------------------------
         ax2.plot(df_rankle["Timestamp"], df_rankle["{}_filt".format(self.peaks_axis.capitalize())],
-                 color='red', label="RA_{} ({} peaks)".format(self.peaks_axis, len(self.peaks_array[1])))
+                 color='red', label="RA_{}".format(self.peaks_axis))
 
         if len(self.peaks_array[1]) > 0:
             ax2.plot([self.df_rankle["Timestamp"].iloc[i] for i in self.peaks_array[1] if
@@ -693,18 +732,20 @@ class Wearables:
                       i in self.peaks_array[1] if start_offset <= i <= end_offset],
                      linestyle="", color='black', marker="x")
         ax2.set_ylabel("G")
-        ax2.legend()
+        ax2.legend(loc='upper left')
+        ax2.set_xlim(x_lim)
 
         # Left Wrist --------------------------------------------------------------------------------------------------
         ax3.plot(df_wrist["Timestamp"], df_wrist["{}_filt".format(self.peaks_axis.capitalize())],
-                 color='blue', label="LW_{} ({} peaks)".format(self.peaks_axis, len(self.peaks_array[2])))
+                 color='blue', label="LW_{}".format(self.peaks_axis))
         if len(self.peaks_array[2]) > 0:
             ax3.plot([self.df_wrist["Timestamp"].iloc[i] for i in self.peaks_array[2] if start_offset <= i <= end_offset],
                      [self.df_wrist["{}_filt".format(self.peaks_axis.capitalize())].iloc[i] for
                       i in self.peaks_array[2] if start_offset <= i <= end_offset],
                      linestyle="", color='black', marker="x")
         ax3.set_ylabel("G")
-        ax3.legend()
+        ax3.legend(loc='upper left')
+        ax3.set_xlim(x_lim)
 
         ax3.xaxis.set_major_formatter(xfmt)
         ax3.xaxis.set_major_locator(locator)
@@ -720,6 +761,6 @@ x = Wearables(leftankle_filepath="Lab4_LAnkle.csv", rightankle_filepath="Lab4_RA
 x.filter_signal(device_type="accelerometer", type="bandpass", low_f=0.5, high_f=10, filter_order=3)
 # x.plot_ankles_x()
 # x.plot_ankle_data()
-# x.plot_all_data(axis="x")
-#x.find_peaks(min_dist_ms=300, thresh_type="normalized", threshold=.7, axis="x")
+# x.plot_all_data(axis="y")
+# x.find_peaks(min_dist_ms=300, thresh_type="normalized", threshold=.7, axis="x")
 # x.plot_detected_peaks()
