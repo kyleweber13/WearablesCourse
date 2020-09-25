@@ -438,7 +438,6 @@ class Wearables:
 
         # Plot set up ------------------------------------------------------------------------------------------------
         start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
-        print(start_stamp, stop_stamp)
         window_len = (stop_stamp - start_stamp).seconds / 60
         xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
 
@@ -447,8 +446,8 @@ class Wearables:
         self.stop_stamp = stop_stamp
 
         # Sets xlim so legend shouldn't overlap any data
-        buffer_len = window_len / 8
-        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=1))
+        buffer_len = window_len / 6
+        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=buffer_len/2))
 
         # Sets stop to end of collection if stop timestamp exceeds timestamp range
         try:
@@ -501,7 +500,7 @@ class Wearables:
         ax2.xaxis.set_major_locator(locator)
         plt.xticks(rotation=45, fontsize=8)
 
-    def plot_ankle_data(self, start=None, stop=None, downsample_factor=1):
+    def plot_ankle_data(self, start=None, stop=None, downsample_factor=1, use_filtered=True):
         """Generates plot of right and left ankle data. One subplot for each axis (x, y, z) with both ankles
            plotted on same subplot.
 
@@ -509,6 +508,11 @@ class Wearables:
         """
 
         # Plot set up ------------------------------------------------------------------------------------------------
+        if use_filtered:
+            col_name_suff = "_filt"
+        if not use_filtered:
+            col_name_suff = ""
+
         start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
         window_len = (stop_stamp - start_stamp).seconds / 60
         xfmt, locator, bottom_plot_crop_value = self.set_xaxis_format(window_len=window_len)
@@ -519,7 +523,7 @@ class Wearables:
 
         # Sets xlim so legend shouldn't overlap any data
         buffer_len = window_len / 8
-        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=1))
+        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=buffer_len/2))
 
         # Sets stop to end of collection if stop timestamp exceeds timestamp range
         try:
@@ -546,21 +550,23 @@ class Wearables:
         # Plotting ---------------------------------------------------------------------------------------------------
 
         fig, (ax1, ax2, ax3) = plt.subplots(3, sharex="col", sharey='col', figsize=(self.fig_width, self.fig_height))
+        plt.suptitle("All Accelerometer Data (filtered = {})".format(use_filtered))
+
         plt.subplots_adjust(bottom=bottom_plot_crop_value)
-        ax1.plot(df_lankle["Timestamp"], df_lankle["X_filt"], color='black', label="LA_x")
-        ax1.plot(df_rankle["Timestamp"], df_rankle["X_filt"], color='red', label="RA_x")
+        ax1.plot(df_lankle["Timestamp"], df_lankle["X" + col_name_suff], color='black', label="LA_x")
+        ax1.plot(df_rankle["Timestamp"], df_rankle["X" + col_name_suff], color='red', label="RA_x")
         ax1.set_ylabel("G")
         ax1.legend(loc='upper left')
         ax1.set_xlim(x_lim)
 
-        ax2.plot(df_lankle["Timestamp"], df_lankle["Y_filt"], color='black', label="LA_y")
-        ax2.plot(df_rankle["Timestamp"], df_rankle["Y_filt"], color='red', label="RA_y")
+        ax2.plot(df_lankle["Timestamp"], df_lankle["Y" + col_name_suff], color='black', label="LA_y")
+        ax2.plot(df_rankle["Timestamp"], df_rankle["Y" + col_name_suff], color='red', label="RA_y")
         ax2.set_ylabel("G")
         ax2.legend(loc='upper left')
         ax2.set_xlim(x_lim)
 
-        ax3.plot(df_lankle["Timestamp"], df_lankle["Z_filt"], color='black', label="LA_z")
-        ax3.plot(df_rankle["Timestamp"], df_rankle["Z_filt"], color='red', label="RA_z")
+        ax3.plot(df_lankle["Timestamp"], df_lankle["Z" + col_name_suff], color='black', label="LA_z")
+        ax3.plot(df_rankle["Timestamp"], df_rankle["Z" + col_name_suff], color='red', label="RA_z")
         ax3.set_ylabel("G")
         ax3.legend(loc='upper left')
         ax3.set_xlim(x_lim)
@@ -589,7 +595,7 @@ class Wearables:
 
         # Sets xlim so legend shouldn't overlap any data
         buffer_len = window_len / 8
-        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=1))
+        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=buffer_len/2))
 
         # Sets stop to end of collection if stop timestamp exceeds timestamp range
         try:
@@ -764,8 +770,8 @@ x = Wearables(leftankle_filepath="Data Files/Labs3and4_LAnkle.csv",
               rightankle_filepath="Data Files/Labs3and4_RAnkle.csv",
               leftwrist_filepath="Data Files/Labs3and4_LWrist_1.csv")
 x.filter_signal(device_type="accelerometer", type="bandpass", low_f=0.5, high_f=10, filter_order=3)
-# x.plot_ankles_x(use_filtered=False)
-# x.plot_ankle_data()
-# x.plot_all_data(axis="mag")
+# x.plot_ankles_x(use_filtered=False, start="2020-09-23 08:24:59.00", stop="2020-09-23 08:25:02.00")
+# x.plot_ankle_data(use_filtered=True, start="2020-09-23 08:24:59.00", stop="2020-09-23 08:25:02.00")
+# x.plot_all_data(axis="mag", start="2020-09-23 08:24:59.00", stop="2020-09-23 08:25:02.00")
 # x.find_peaks(min_dist_ms=300, thresh_type="absolute", threshold=1.5, axis="x")
 # x.plot_detected_peaks()
