@@ -9,6 +9,47 @@ import os  # module allowing code to use operating system dependent functionalit
 from scipy.signal import butter, filtfilt  # signal processing toolbox
 import peakutils
 import random
+import matplotlib.ticker as ticker
+
+
+class PrecisionDateFormatter(ticker.Formatter):
+    """
+    Extend the `matplotlib.ticker.Formatter` class to allow for millisecond
+    precision when formatting a tick (in days since the epoch) with a
+    `~datetime.datetime.strftime` format string.
+
+    """
+
+    def __init__(self, fmt, precision=3, tz=None):
+        """
+        Parameters
+        ----------
+        fmt : str
+            `~datetime.datetime.strftime` format string.
+        """
+        from matplotlib.dates import num2date
+        if tz is None:
+            from matplotlib.dates import _get_rc_timezone
+            tz = _get_rc_timezone()
+        self.num2date = num2date
+        self.fmt = fmt
+        self.tz = tz
+        self.precision = precision
+
+    def __call__(self, x, pos=0):
+        if x == 0:
+            raise ValueError("DateFormatter found a value of x=0, which is "
+                             "an illegal date; this usually occurs because "
+                             "you have not informed the axis that it is "
+                             "plotting dates, e.g., with ax.xaxis_date()")
+
+        dt = self.num2date(x, self.tz)
+        ms = dt.strftime("%f")[:self.precision]
+
+        return dt.strftime(self.fmt).format(ms=ms)
+
+    def set_tzinfo(self, tz):
+        self.tz = tz
 
 
 class Wearables:
@@ -409,19 +450,22 @@ class Wearables:
 
         # Formatting x-axis ticks ------------------------------------------------------------------------------------
         if window_len >= .25:
-            xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S")
+            # xfmt = mdates.DateFormatter("%a %b %d, \n%H:%M:%S")
+            xfmt = mdates.DateFormatter("%H:%M:%S %p")
             bottom_plot_crop_value = .17
         # Shows milliseconds if plotting less than 15-second window
         if window_len < .25:
-            xfmt = mdates.DateFormatter("%a %b %d, %H:%M:%S.%f")
+            # xfmt = mdates.DateFormatter("%a %b %d, \n%H:%M:%S.%f")
+            xfmt = mdates.DateFormatter("%H:%M:%S.%f %p")
             bottom_plot_crop_value = .23
 
         # Generates ~15 ticks (1/15th of window length apart)
         locator = mdates.MinuteLocator(byminute=np.arange(0, 59, int(np.ceil(window_len / 15))), interval=1)
+        # locator = mdates.MinuteLocator(byminute=np.arange(0, 59, window_len / 15), interval=1)
 
         # Two-second ticks if window length between 5 and 30 seconds
         if 1 / 12 < window_len <= .5:
-            locator = mdates.SecondLocator(interval=2)
+            locator = mdates.SecondLocator(np.arange(0, 60, 1), interval=2)
 
         # Plots ~15 ticks if window less than 5 seconds
         if window_len <= 1 / 12:
@@ -496,9 +540,19 @@ class Wearables:
         ax2.set_ylabel("G")
         ax2.legend(loc='upper left')
 
-        ax2.xaxis.set_major_formatter(xfmt)
-        ax2.xaxis.set_major_locator(locator)
+        #ax2.xaxis.set_major_formatter(xfmt)
+        ax2.xaxis.set_major_formatter(PrecisionDateFormatter("%H:%M:%S.{ms} %p"))
+        # ax2.xaxis.set_major_locator(locator)
         plt.xticks(rotation=45, fontsize=8)
+
+        f_name = self.check_file_overwrite("AnkleDataXAxis_{}_{} to {}".format("Raw" if not use_filtered
+                                                                               else "Filtered",
+                                                                               datetime.strftime(start_stamp,
+                                                                                                 "%Y-%m-%d %H_%M_%S"),
+                                                                               datetime.strftime(stop_stamp,
+                                                                                                 "%Y-%m-%d %H_%M_%S")))
+        plt.savefig(f_name)
+        print("Plot saved as png ({})".format(f_name))
 
     def plot_ankle_data(self, start=None, stop=None, downsample_factor=1, use_filtered=True):
         """Generates plot of right and left ankle data. One subplot for each axis (x, y, z) with both ankles
@@ -571,9 +625,19 @@ class Wearables:
         ax3.legend(loc='upper left')
         ax3.set_xlim(x_lim)
 
-        ax3.xaxis.set_major_formatter(xfmt)
-        ax3.xaxis.set_major_locator(locator)
+        # ax3.xaxis.set_major_formatter(xfmt)
+        # ax3.xaxis.set_major_locator(locator)
+        ax3.xaxis.set_major_formatter(PrecisionDateFormatter("%H:%M:%S.{ms} %p"))
         plt.xticks(rotation=45, fontsize=8)
+
+        f_name = self.check_file_overwrite("AllAnkleData_{}_{} "
+                                           "to {}".format("Raw" if not use_filtered else "Filtered",
+                                                          datetime.strftime(start_stamp,
+                                                                            "%Y-%m-%d %H_%M_%S"),
+                                                          datetime.strftime(stop_stamp,
+                                                                            "%Y-%m-%d %H_%M_%S")))
+        plt.savefig(f_name)
+        print("Plot saved as png ({})".format(f_name))
 
     def plot_all_data(self, start=None, stop=None, downsample_factor=1, axis="x"):
         """Plots both ankles on one subplot and wrist on the second subplot.
@@ -643,9 +707,17 @@ class Wearables:
         ax2.legend(loc='upper left')
         ax2.set_xlim(x_lim)
 
-        ax2.xaxis.set_major_formatter(xfmt)
-        ax2.xaxis.set_major_locator(locator)
+        # ax2.xaxis.set_major_formatter(xfmt)
+        # ax2.xaxis.set_major_locator(locator)
+        ax2.xaxis.set_major_formatter(PrecisionDateFormatter("%H:%M:%S.{ms} %p"))
         plt.xticks(rotation=45, fontsize=8)
+
+        f_name = self.check_file_overwrite("AllData_Filtered_{}Axis_{} "
+                                           "to {}".format(axis,
+                                                          datetime.strftime(start_stamp, "%Y-%m-%d %H_%M_%S"),
+                                                          datetime.strftime(stop_stamp, "%Y-%m-%d %H_%M_%S")))
+        plt.savefig(f_name)
+        print("Plot saved as png ({})".format(f_name))
 
     def plot_detected_peaks(self, start=None, stop=None):
         """Plots detected peaks from self.find_peaks() marked on whichever accelerometer axis was used.
@@ -671,7 +743,7 @@ class Wearables:
 
         # Sets xlim so legend shouldn't overlap any data
         buffer_len = window_len / 8
-        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=1))
+        x_lim = (self.start_stamp - timedelta(minutes=buffer_len), self.stop_stamp + timedelta(minutes=buffer_len/2))
 
         # Sets stop to end of collection if stop timestamp exceeds timestamp range
         try:
@@ -747,8 +819,9 @@ class Wearables:
         ax3.legend(loc='upper left')
         ax3.set_xlim(x_lim)
 
-        ax3.xaxis.set_major_formatter(xfmt)
-        ax3.xaxis.set_major_locator(locator)
+        # ax3.xaxis.set_major_formatter(xfmt)
+        # ax3.xaxis.set_major_locator(locator)
+        ax3.xaxis.set_major_formatter(PrecisionDateFormatter("%H:%M:%S.{ms} %p"))
         plt.xticks(rotation=45, fontsize=8)
 
         f_name = self.check_file_overwrite("DetectedPeaks_{}Thresh_{}Axis_{}ms_{} "
@@ -770,8 +843,8 @@ x = Wearables(leftankle_filepath="Data Files/Labs3and4_LAnkle.csv",
               rightankle_filepath="Data Files/Labs3and4_RAnkle.csv",
               leftwrist_filepath="Data Files/Labs3and4_LWrist_1.csv")
 x.filter_signal(device_type="accelerometer", type="bandpass", low_f=0.5, high_f=10, filter_order=3)
-# x.plot_ankles_x(use_filtered=False, start="2020-09-23 08:24:59.00", stop="2020-09-23 08:25:02.00")
-# x.plot_ankle_data(use_filtered=True, start="2020-09-23 08:24:59.00", stop="2020-09-23 08:25:02.00")
-# x.plot_all_data(axis="mag", start="2020-09-23 08:24:59.00", stop="2020-09-23 08:25:02.00")
+# x.plot_ankles_x(use_filtered=False)
+# x.plot_ankle_data(use_filtered=True)
+# x.plot_all_data(axis="mag", start=None, stop=None)
 # x.find_peaks(min_dist_ms=300, thresh_type="absolute", threshold=1.5, axis="x")
 # x.plot_detected_peaks()
