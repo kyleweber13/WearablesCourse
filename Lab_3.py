@@ -51,6 +51,45 @@ class PrecisionDateFormatter(ticker.Formatter):
         self.tz = tz
 
 
+def plot_normalized_gait_cycles():
+    import random
+
+    plt.close("all")
+
+    fig, (ax1, ax2) = plt.subplots(2, sharex="col", figsize=(10, 6))
+
+    # Choose random deteced peak
+    peak_ind = random.randint(3, len(x.peaks_array[0])-3)
+
+    # Crops data to 1 step before and 1 step after "central" peak
+    data = x.df_lankle[x.peaks_axis.capitalize()].iloc[x.peaks_array[0][peak_ind-1]:x.peaks_array[0][peak_ind+2]]
+
+    # Calculates
+    cycle_len = x.peaks_array[0][peak_ind] - x.peaks_array[0][peak_ind-1]
+    xticks = np.arange(-1, 2, 1/cycle_len) * 100
+
+    ax1.plot(xticks, data.iloc[:len(xticks)], color='black', label="Peak index = {}".format(peak_ind))
+    ax1.plot([-100, 0, 100, 200],
+             [x.df_lankle[x.peaks_axis.capitalize()].iloc[i] for i in x.peaks_array[0][peak_ind-1:peak_ind+3]],
+             linestyle="", color='red', marker="x")
+    ax1.set_ylabel("G's")
+    ax1.fill_between(x=[0, 100], y1=min(data), y2=max(data), color='dodgerblue', alpha=.35)
+    ax1.legend()
+
+    peak_ind = random.randint(3, len(x.peaks_array[0])-3)
+    data = x.df_lankle[x.peaks_axis.capitalize()].iloc[x.peaks_array[0][peak_ind-1]:x.peaks_array[0][peak_ind+2]]
+    cycle_len = x.peaks_array[0][peak_ind] - x.peaks_array[0][peak_ind-1]
+    xticks = np.arange(-1, 2, 1/cycle_len)*100
+    ax2.plot(xticks, data.iloc[:len(xticks)], color='black', label="Peak index = {}".format(peak_ind))
+    ax2.plot([-100, 0, 100, 200],
+             [x.df_lankle[x.peaks_axis.capitalize()].iloc[i] for i in x.peaks_array[0][peak_ind-1:peak_ind+3]],
+             linestyle="", color='red', marker="x")
+    ax2.set_ylabel("G's")
+    ax2.fill_between(x=[0, 100], y1=min(data), y2=max(data), color='green', alpha=.35)
+    ax2.set_xlabel("% of gait cycle")
+    ax2.legend()
+
+
 class Wearables:
 
     def __init__(self, leftwrist_filepath=None, leftankle_filepath=None, rightankle_filepath=None,
@@ -82,12 +121,14 @@ class Wearables:
         self.rankle_inverted = False  # boolean of whether right ankle x-axis has been inverted
 
         self.peaks_array = None
-        self.peaks_axis = "Y"
+        """self.peaks_axis = "Y"
         self.peaks_threshold_type = "normalized"
         self.peaks_thresh = 0.7
         self.peaks_min_dist = 250
+        self.peak_index_offset = 0"""
+        self.peaks_dict = {"Axis": None, "Threshold type": None, "Threshold": None,
+                           "Min distance": None, "Offset index": None}
         self.ankle_peaks = None  # data for all ankle peaks (right and left combined)
-        self.peak_index_offset = 0
 
         # Methods and objects that are run automatically when class instance is created -------------------------------
 
@@ -345,8 +386,9 @@ class Wearables:
         df_rankle = df_rankle.reset_index()
         df_wrist = df_wrist.reset_index()
 
-        self.peak_index_offset = int(np.ceil((start_stamp - self.df_lankle.iloc[0]["Timestamp"]).total_seconds() *
-                                             self.lankle_samplerate))
+        peaks_dict = {"Offset index": int(np.ceil((start_stamp -
+                                                   self.df_lankle.iloc[0]["Timestamp"]).total_seconds() *
+                                                  self.lankle_samplerate))}
 
         lankle_peaks = peakutils.indexes(y=df_lankle["{}_filt".format(axis.capitalize())],
                                          min_dist=int(self.lankle_samplerate/(1000/min_dist_ms)),
@@ -365,13 +407,16 @@ class Wearables:
         print("-Right ankle: {} peaks".format(len(rankle_peaks)))
         print("-Left wrist: {} peaks".format(len(wrist_peaks)))
 
-        self.peaks_array = np.array([lankle_peaks, rankle_peaks, wrist_peaks], dtype='object')
-        self.peaks_axis = axis
-        self.peaks_threshold_type = thresh_type
-        self.peaks_thresh = threshold
-        self.peaks_min_dist = min_dist_ms
+        peaks_dict["Axis"] = axis
+        peaks_dict["Threshold type"] = thresh_type
+        peaks_dict["Threshold"] = threshold
+        peaks_dict["Min distance"] = min_dist_ms
 
-        self.ankle_peaks = sorted(np.concatenate((self.peaks_array[0], self.peaks_array[1])))
+        peaks_array = np.array([lankle_peaks, rankle_peaks, wrist_peaks], dtype='object')
+
+        ankle_peaks = sorted(np.concatenate((peaks_array[0], peaks_array[1])))
+
+        return peaks_array, ankle_peaks, peaks_dict
 
     def get_timestamps(self, start=None, stop=None):
 
@@ -750,8 +795,10 @@ class Wearables:
             return None
 
         # Calls peak detection method
-        self.find_peaks(min_dist_ms=min_dist_ms, thresh_type=thresh_type, threshold=threshold, axis=axis,
-                        start=start, stop=stop)
+        self.peaks_array, self.ankle_peaks, self.peaks_dict = self.find_peaks(min_dist_ms=min_dist_ms,
+                                                                              thresh_type=thresh_type,
+                                                                              threshold=threshold,
+                                                                              axis=axis, start=start, stop=stop)
 
         # Plot set up ------------------------------------------------------------------------------------------------
         start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
@@ -789,16 +836,19 @@ class Wearables:
         fig, (ax1, ax2, ax3) = plt.subplots(3, sharex="col", figsize=(self.fig_width, self.fig_height))
         plt.subplots_adjust(bottom=bottom_plot_crop_value)
 
-        plt.suptitle("{} data ({} threshold of {}, min_dist = {}ms)".format(self.peaks_axis.capitalize(),
-                                                                            self.peaks_threshold_type,
-                                                                            self.peaks_thresh, self.peaks_min_dist))
+        plt.suptitle("{} data ({} threshold of {}, min_dist = {}ms)".format(self.peaks_dict["Axis"].capitalize(),
+                                                                            self.peaks_dict["Threshold type"],
+                                                                            self.peaks_dict["Threshold"],
+                                                                            self.peaks_dict["Min distance"]))
 
         # Left Ankle -------------------------------------------------------------------------------------------------
-        ax1.plot(df_lankle["Timestamp"], df_lankle["{}_filt".format(self.peaks_axis.capitalize())],
-                 color='black', label="LA_{}".format(self.peaks_axis))
+        ax1.plot(df_lankle["Timestamp"], df_lankle["{}_filt".format(self.peaks_dict["Axis"].capitalize())],
+                 color='black', label="LA_{}".format(self.peaks_dict["Axis"]))
         if len(self.peaks_array[0]) > 0:
-            ax1.plot([self.df_lankle["Timestamp"].iloc[i + self.peak_index_offset] for i in self.peaks_array[0]],
-                     [self.df_lankle["{}_filt".format(self.peaks_axis.capitalize())].iloc[i + self.peak_index_offset]
+            ax1.plot([self.df_lankle["Timestamp"].iloc[i + self.peaks_dict["Offset index"]] for
+                      i in self.peaks_array[0]],
+                     [self.df_lankle["{}_filt".format(self.peaks_dict["Axis"].
+                                                      capitalize())].iloc[i + self.peaks_dict["Offset index"]]
                       for i in self.peaks_array[0]],
                      linestyle="", color='red', marker="x")
         ax1.set_ylabel("G")
@@ -806,12 +856,14 @@ class Wearables:
         ax1.set_xlim(x_lim)
 
         # Right Ankle -------------------------------------------------------------------------------------------------
-        ax2.plot(df_rankle["Timestamp"], df_rankle["{}_filt".format(self.peaks_axis.capitalize())],
-                 color='red', label="RA_{}".format(self.peaks_axis))
+        ax2.plot(df_rankle["Timestamp"], df_rankle["{}_filt".format(self.peaks_dict["Axis"].capitalize())],
+                 color='red', label="RA_{}".format(self.peaks_dict["Axis"]))
 
         if len(self.peaks_array[1]) > 0:
-            ax2.plot([self.df_rankle["Timestamp"].iloc[i + self.peak_index_offset] for i in self.peaks_array[1]],
-                     [self.df_rankle["{}_filt".format(self.peaks_axis.capitalize())].iloc[i + self.peak_index_offset]
+            ax2.plot([self.df_rankle["Timestamp"].iloc[i + self.peaks_dict["Offset index"]]
+                      for i in self.peaks_array[1]],
+                     [self.df_rankle["{}_filt".format(self.peaks_dict["Axis"].
+                                                      capitalize())].iloc[i + self.peaks_dict["Offset index"]]
                       for i in self.peaks_array[1]],
                      linestyle="", color='black', marker="x")
         ax2.set_ylabel("G")
@@ -819,11 +871,12 @@ class Wearables:
         ax2.set_xlim(x_lim)
 
         # Left Wrist --------------------------------------------------------------------------------------------------
-        ax3.plot(df_wrist["Timestamp"], df_wrist["{}_filt".format(self.peaks_axis.capitalize())],
-                 color='blue', label="LW_{}".format(self.peaks_axis))
+        ax3.plot(df_wrist["Timestamp"], df_wrist["{}_filt".format(self.peaks_dict["Axis"].capitalize())],
+                 color='blue', label="LW_{}".format(self.peaks_dict["Axis"]))
         if len(self.peaks_array[2]) > 0:
-            ax3.plot([self.df_wrist["Timestamp"].iloc[i + self.peak_index_offset] for i in self.peaks_array[2]],
-                     [self.df_wrist["{}_filt".format(self.peaks_axis.capitalize())].iloc[i + self.peak_index_offset]
+            ax3.plot([self.df_wrist["Timestamp"].iloc[i + self.peaks_dict["Offset index"]] for i in self.peaks_array[2]],
+                     [self.df_wrist["{}_filt".format(self.peaks_dict["Axis"].
+                                                     capitalize())].iloc[i + self.peaks_dict["Offset index"]]
                       for i in self.peaks_array[2]],
                      linestyle="", color='black', marker="x")
         ax3.set_ylabel("G")
@@ -836,8 +889,9 @@ class Wearables:
         plt.xticks(rotation=45, fontsize=8)
 
         f_name = self.check_file_overwrite("DetectedPeaks_{}Thresh_{}Axis_{}ms_{} "
-                                           "to {}".format(self.peaks_threshold_type.capitalize(),
-                                                          self.peaks_axis.capitalize(), self.peaks_min_dist,
+                                           "to {}".format(self.peaks_dict["Threshold type"].capitalize(),
+                                                          self.peaks_dict["Axis"].capitalize(),
+                                                          self.peaks_dict["Min distance"],
                                                           datetime.strftime(start_stamp,
                                                                             "%Y-%m-%d %H_%M_%S"),
                                                           datetime.strftime(stop_stamp,
@@ -845,61 +899,191 @@ class Wearables:
         plt.savefig(f_name)
         print("Plot saved as png ({})".format(f_name))
 
+    def plot_cycles(self, start1=None, stop1=None, label1=" ", start2=None, stop2=None, label2=" ", axis="Y"):
+
+        if not self.filter_run:
+            print("\nPlease filter your data and try again.")
+
+        df = self.df_lankle
+        fs = self.lankle_samplerate
+
+        df1 = df.loc[(df["Timestamp"] > start1) & (df["Timestamp"] < stop1)]
+        df2 = df.loc[(df["Timestamp"] > start2) & (df["Timestamp"] < stop2)]
+
+        plt.subplots(2, 2, sharex='col', figsize=(self.fig_width, self.fig_height))
+        plt.suptitle("Activity Comparison ({} axis)".format(axis))
+
+        # Activity 1: raw ---------------------------------------------------------------------------------------------
+        plt.subplot(2, 2, 1)
+        plt.title("Raw")
+
+        plt.plot(np.arange(0, df1.shape[0], 1) / fs, df1[axis.capitalize()], color='black', label=label1)
+        plt.ylabel("G")
+
+        peaks1 = peakutils.indexes(y=np.asarray(df1["{}_filt".format(axis.capitalize())]),
+                                   min_dist=int(600 / 1000 * fs), thres=.7)
+        plt.plot([np.arange(0, df1.shape[0], 1)[i] / fs for i in peaks1],
+                 [df1[axis.capitalize()].iloc[i] for i in peaks1], color='red', marker="x", linestyle="")
+        plt.fill_betweenx(x1=np.arange(0, df2.shape[0], 1)[peaks1[-1]] / fs,
+                          x2=np.arange(0, df2.shape[0], 1)[peaks1[-2]] / fs,
+                          y=[min(df1[axis.capitalize()]), max(df1[axis.capitalize()])],
+                          color='grey', alpha=.75, label="One cycle")
+
+        plt.legend()
+
+        # Activity 1: filtered ----------------------------------------------------------------------------------------
+        plt.subplot(2, 2, 2)
+        plt.title("Filtered")
+
+        plt.plot(np.arange(0, df1.shape[0], 1) / fs, df1["{}_filt".format(axis.capitalize())], color='black',
+                 label=label1)
+        plt.legend()
+
+        # Activity 2: raw ---------------------------------------------------------------------------------------------
+        plt.subplot(2, 2, 3)
+        plt.plot(np.arange(0, df2.shape[0], 1) / fs, df2[axis.capitalize()], color='red', label=label2)
+        plt.ylabel("G")
+
+        peaks2 = peakutils.indexes(y=np.asarray(df2["{}_filt".format(axis.capitalize())]),
+                                   min_dist=int(600 / 1000 * fs), thres=.7)
+
+        plt.plot([np.arange(0, df2.shape[0], 1)[i] / fs for i in peaks2],
+                 [df2[axis.capitalize()].iloc[i] for i in peaks2], color='black', marker="x", linestyle="")
+
+        plt.fill_betweenx(x1=np.arange(0, df2.shape[0], 1)[peaks2[-1]] / fs,
+                          x2=np.arange(0, df2.shape[0], 1)[peaks2[-2]] / fs,
+                          y=[min(df2[axis.capitalize()]), max(df2[axis.capitalize()])],
+                          color='grey', alpha=.75, label="One cycle")
+
+        plt.legend()
+        plt.xlabel("Seconds")
+
+        # Activity 2: filtered ----------------------------------------------------------------------------------------
+        plt.subplot(2, 2, 4)
+        plt.plot(np.arange(0, df1.shape[0], 1) / fs, df2["{}_filt".format(axis.capitalize())], color='red',
+                 label=label2)
+        plt.legend()
+        plt.xlabel("Seconds")
+
+        f_name = self.check_file_overwrite("{}_{}_comparison_{}axis".format(label1.capitalize(),
+                                                                            label2.capitalize(), axis))
+        plt.savefig(f_name)
+        print("Plot saved as png ({})".format(f_name))
+
     def compare_walk_and_run(self):
 
         pass
 
-    def find_bouts(self, min_dur=10, min_steps=None, break_max=5):
+    def orendruff_bouts(self, min_dist_ms=500, thresh_type="normalized", threshold=0.7, axis="y",
+                        start=None, stop=None):
+        """Finds periods of time in which steps occur in the subsequent 10-second window. Bout ends if no steps detected
+           in subsequent 10-second window."""
 
-        min_dur = min_dur * self.lankle_samplerate
-        break_max = break_max * self.lankle_samplerate
+        # Detects peaks
+        peaks_array, ankle_peaks, peaks_dict = self.find_peaks(min_dist_ms=min_dist_ms, thresh_type=thresh_type,
+                                                            threshold=threshold, axis=axis,
+                                                            start=start, stop=stop)
+
+        # Difference between consecutive bilateral ankle peaks
+        peak_diffs = [(ankle_peaks[i+1] - ankle_peaks[i]) for i in range(len(ankle_peaks)-1)]
+
+        # Bout starts
+        bout_starts = [ankle_peaks[i] for i in range(len(peak_diffs)) if
+                       peak_diffs[i - 1] > 10 * self.lankle_samplerate > peak_diffs[i]]
+
+        # Ends of bouts
+        bout_ends = [ankle_peaks[i] for i in range(len(peak_diffs)) if peak_diffs[i] > 10 * self.lankle_samplerate]
+
+        # Inserts first step index as first bout if qualifies
+        if peak_diffs[0] < 10 * self.lankle_samplerate:
+            bout_starts.insert(0, ankle_peaks[0])
+
+        # Appends final step as end of bout
+        if bout_ends[-1] < bout_starts[-1]:
+            bout_ends.append(ankle_peaks[-1])
+
+        # Crops dataframes
+        df_lankle = self.df_lankle.loc[(self.df_lankle["Timestamp"] > start) &
+                                       (self.df_lankle["Timestamp"] < stop)].reset_index()
+        df_rankle = self.df_rankle.loc[(self.df_rankle["Timestamp"] > start) &
+                                       (self.df_rankle["Timestamp"] < stop)].reset_index()
+
+        # PLOTTING ---------------------------------------------------------------------------------------------------
+        plt.subplots(1, figsize=(self.fig_width, self.fig_height))
+        plt.subplot(1, 1, 1)
+        plt.title("Orendurff et al. bout detection ({}-axis)".format(axis))
+
+        # Left ankle + peaks
+        plt.plot(np.arange(0, df_lankle.shape[0])/self.lankle_samplerate, df_lankle["Y"],
+                 color='black', label="LA")
+        plt.plot(peaks_array[0]/75, [df_lankle["Y"].iloc[p] for p in peaks_array[0]],
+                 color='black', linestyle="", marker="x")
+
+        # Right ankle + peaks
+        plt.plot(np.arange(0, df_rankle.shape[0])/self.rankle_samplerate, df_rankle["Y"],
+                 color='red', label="RA")
+        plt.plot(peaks_array[1]/75, [df_rankle["Y"].iloc[p] for p in peaks_array[1]],
+                 color='red', linestyle="", marker="x")
+
+        # Shades bouts and calculates outcome measures
+        bout_lens = []
+        bout_steps = []
+        start_stamps = []
+        end_stamps = []
+        for s, e in zip(bout_starts, bout_ends):
+            plt.fill_between(x=[np.arange(0, df_lankle.shape[0])[s]/self.lankle_samplerate,
+                                np.arange(0, df_lankle.shape[0])[e]/self.lankle_samplerate],
+                             y1=plt.ylim()[0], y2=plt.ylim()[-1], color='grey', alpha=.5)
+            bout_lens.append(round((e-s)/self.lankle_samplerate, 1))
+            bout_steps.append(len([i for i in ankle_peaks if s <= i <= e]))
+            start_stamps.append(df_lankle.iloc[s]["Timestamp"])
+            end_stamps.append(df_lankle.iloc[e]["Timestamp"])
+
+        plt.xlabel("Seconds")
+        plt.ylabel("G")
+        plt.legend()
+
+        start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S.%f")
+        stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S.%f")
+
+        f_name = self.check_file_overwrite("OrendurffBouts_{}Axis_{} "
+                                           "to {}".format(axis.capitalize(),
+                                                          datetime.strftime(start_stamp,
+                                                                            "%Y-%m-%d %H_%M_%S"),
+                                                          datetime.strftime(stop_stamp,
+                                                                            "%Y-%m-%d %H_%M_%S")))
+        plt.savefig(f_name)
+        print("Plot saved as png ({})".format(f_name))
+
+        # Creates output dictionary
+        output_dict = {"N bouts": len(bout_starts),
+                       "Steps per bout": bout_steps,
+                       "Bout duration (s)": bout_lens}
+
+        output_df = pd.DataFrame(list(zip(np.arange(1, len(start_stamps)+1), start_stamps, end_stamps,
+                                          bout_lens, bout_steps)),
+                                 columns=["Bout", "Start", "End", "Duration (s)", "Steps"])
+        output_df = output_df.set_index("Bout", drop=True)
+
+        return output_df
 
 
-x = Wearables(leftankle_filepath="Data Files/Labs3and4_LAnkle.csv",
-              rightankle_filepath="Data Files/Labs3and4_RAnkle.csv",
-              leftwrist_filepath="Data Files/Labs3and4_LWrist_1.csv")
-x.filter_signal(device_type="accelerometer", type="bandpass", low_f=0.5, high_f=10, filter_order=3)
+x = Wearables(leftankle_filepath="Data Files/Lab4_LAnkle.csv",
+              rightankle_filepath="Data Files/Lab4_RAnkle.csv",
+              leftwrist_filepath="Data Files/Lab4_LWrist.csv")
+x.filter_signal(device_type="accelerometer", type="bandpass", low_f=0.5, high_f=20, filter_order=3)
+
 # x.plot_ankles_x(use_filtered=False)
 # x.plot_ankle_data(use_filtered=True)
 # x.plot_all_data(axis="mag", start=None, stop=None)
 
-# x.find_peaks(min_dist_ms=300, thresh_type="absolute", threshold=.76, axis="x",
-#             start="2020-09-23 08:20:00.00", stop="2020-09-23 08:22:00.00")
-
-x.plot_detected_peaks(min_dist_ms=300, thresh_type="normalized", threshold=.7, axis="y",
-                      start="2020-09-23 08:20:00.00", stop="2020-09-23 08:22:00.00")
+# x.plot_detected_peaks(min_dist_ms=300, thresh_type="absolute", threshold=0.75, axis="y",
+#                      start="2020-09-28 8:31:20.00", stop="2020-09-28 8:31:25.00")
 
 # UPDATES
-# moved find_peaks() function call into plot_detected_peaks
-# now able to use start/stop to detect peaks specific regions
 
+"""x.plot_cycles(label1="Walk",start1="2020-09-28 8:15:20.00", stop1="2020-09-28 8:15:23.00",
+              label2="Run", start2="2020-09-28 8:32:20.00", stop2="2020-09-28 8:32:23.00",
+              axis="Y")"""
 
-def plot_normalized_gait_cycles():
-    import random
-
-    fig, (ax1, ax2) = plt.subplots(2, sharex="col", figsize=(10, 6))
-
-    peak_ind = random.randint(3, len(x.peaks_array[0])-3)
-    data = x.df_lankle[x.peaks_axis.capitalize()].iloc[x.peaks_array[0][peak_ind-1]:x.peaks_array[0][peak_ind+2]]
-    cycle_len = x.peaks_array[0][peak_ind] - x.peaks_array[0][peak_ind-1]
-    xticks = np.arange(-1, 2, 1/cycle_len)*100
-    ax1.plot(xticks, data.iloc[:len(xticks)], color='black', label="Peak index = {}".format(peak_ind))
-    ax1.plot([-100, 0, 100, 200],
-             [x.df_lankle[x.peaks_axis.capitalize()].iloc[i] for i in x.peaks_array[0][peak_ind-1:peak_ind+3]],
-             linestyle="", color='red', marker="x")
-    ax1.set_ylabel("G's")
-    ax1.fill_between(x=[0, 100], y1=min(data), y2=max(data), color='dodgerblue', alpha=.35)
-    ax1.legend()
-
-    peak_ind = random.randint(3, len(x.peaks_array[0])-3)
-    data = x.df_lankle[x.peaks_axis.capitalize()].iloc[x.peaks_array[0][peak_ind-1]:x.peaks_array[0][peak_ind+2]]
-    cycle_len = x.peaks_array[0][peak_ind] - x.peaks_array[0][peak_ind-1]
-    xticks = np.arange(-1, 2, 1/cycle_len)*100
-    ax2.plot(xticks, data.iloc[:len(xticks)], color='black', label="Peak index = {}".format(peak_ind))
-    ax2.plot([-100, 0, 100, 200],
-             [x.df_lankle[x.peaks_axis.capitalize()].iloc[i] for i in x.peaks_array[0][peak_ind-1:peak_ind+3]],
-             linestyle="", color='red', marker="x")
-    ax2.set_ylabel("G's")
-    ax2.fill_between(x=[0, 100], y1=min(data), y2=max(data), color='green', alpha=.35)
-    ax2.set_xlabel("% of gait cycle")
-    ax2.legend()
+orendurff_data = x.orendruff_bouts(start="2020-09-28 08:13:00.00", stop="2020-09-28 08:30:00.00")
