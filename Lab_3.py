@@ -121,11 +121,6 @@ class Wearables:
         self.rankle_inverted = False  # boolean of whether right ankle x-axis has been inverted
 
         self.peaks_array = None
-        """self.peaks_axis = "Y"
-        self.peaks_threshold_type = "normalized"
-        self.peaks_thresh = 0.7
-        self.peaks_min_dist = 250
-        self.peak_index_offset = 0"""
         self.peaks_dict = {"Axis": None, "Threshold type": None, "Threshold": None,
                            "Min distance": None, "Offset index": None}
         self.ankle_peaks = None  # data for all ankle peaks (right and left combined)
@@ -974,80 +969,160 @@ class Wearables:
 
         pass
 
-    def orendruff_bouts(self, min_dist_ms=500, thresh_type="normalized", threshold=0.7, axis="y",
-                        start=None, stop=None):
-        """Finds periods of time in which steps occur in the subsequent 10-second window. Bout ends if no steps detected
-           in subsequent 10-second window."""
+    def detect_bouts(self, algorithm=None, min_dist_ms=500, thresh_type="normalized", threshold=0.7, axis="y",
+                     start=None, stop=None):
+
+        axis = axis.capitalize()
 
         # Detects peaks
         peaks_array, ankle_peaks, peaks_dict = self.find_peaks(min_dist_ms=min_dist_ms, thresh_type=thresh_type,
-                                                            threshold=threshold, axis=axis,
-                                                            start=start, stop=stop)
+                                                               threshold=threshold, axis=axis,
+                                                               start=start, stop=stop)
 
-        # Difference between consecutive bilateral ankle peaks
-        peak_diffs = [(ankle_peaks[i+1] - ankle_peaks[i]) for i in range(len(ankle_peaks)-1)]
+        # Crops datasets
+        df_lankle = self.df_lankle.loc[(self.df_lankle["Timestamp"] >= start) &
+                                       (self.df_lankle["Timestamp"] <= stop)].reset_index()
+        df_rankle = self.df_rankle.loc[(self.df_rankle["Timestamp"] >= start) &
+                                       (self.df_rankle["Timestamp"] <= stop)].reset_index()
 
-        # Bout starts
-        bout_starts = [ankle_peaks[i] for i in range(len(peak_diffs)) if
-                       peak_diffs[i - 1] > 10 * self.lankle_samplerate > peak_diffs[i]]
+        del peaks_dict
 
-        # Ends of bouts
-        bout_ends = [ankle_peaks[i] for i in range(len(peak_diffs)) if peak_diffs[i] > 10 * self.lankle_samplerate]
+        # Bout detection functions -----------------------------------------------------------------------------------
+        def prajapati_bouts():
 
-        # Inserts first step index as first bout if qualifies
-        if peak_diffs[0] < 10 * self.lankle_samplerate:
-            bout_starts.insert(0, ankle_peaks[0])
+            # Calculates time between consecutive steps
+            delta_t = [(ankle_peaks[i + 1] - ankle_peaks[i]) / self.lankle_samplerate for
+                       i in range(0, len(ankle_peaks) - 1)]
 
-        # Appends final step as end of bout
-        if bout_ends[-1] < bout_starts[-1]:
-            bout_ends.append(ankle_peaks[-1])
+            # Calculates number of steps in next 10 seconds ("consecutive steps")
+            steps_in_ten = []
 
-        # Crops dataframes
-        df_lankle = self.df_lankle.loc[(self.df_lankle["Timestamp"] > start) &
-                                       (self.df_lankle["Timestamp"] < stop)].reset_index()
-        df_rankle = self.df_rankle.loc[(self.df_rankle["Timestamp"] > start) &
-                                       (self.df_rankle["Timestamp"] < stop)].reset_index()
+            for ind, peak in enumerate(ankle_peaks):
+                max_ind = peak + self.lankle_samplerate * 10
 
-        # PLOTTING ---------------------------------------------------------------------------------------------------
-        plt.subplots(1, figsize=(self.fig_width, self.fig_height))
-        plt.subplot(1, 1, 1)
-        plt.title("Orendurff et al. bout detection ({}-axis)".format(axis))
+                n_steps = [i for i in ankle_peaks if peak <= i <= max_ind]
 
-        # Left ankle + peaks
-        plt.plot(np.arange(0, df_lankle.shape[0])/self.lankle_samplerate, df_lankle["Y"],
-                 color='black', label="LA")
-        plt.plot(peaks_array[0]/75, [df_lankle["Y"].iloc[p] for p in peaks_array[0]],
-                 color='black', linestyle="", marker="x")
+                steps_in_ten.append(len(n_steps))
 
-        # Right ankle + peaks
-        plt.plot(np.arange(0, df_rankle.shape[0])/self.rankle_samplerate, df_rankle["Y"],
-                 color='red', label="RA")
-        plt.plot(peaks_array[1]/75, [df_rankle["Y"].iloc[p] for p in peaks_array[1]],
-                 color='red', linestyle="", marker="x")
+            # Bout detection -----------------------------------------------------------------------------------------
+            bout_starts = []
+            bout_ends = []
+            start_ind = []
+            end_ind = []
 
-        # Shades bouts and calculates outcome measures
-        bout_lens = []
-        bout_steps = []
-        start_stamps = []
-        end_stamps = []
+            # Loops through each data point of steps in next 10 seconds
+            for i in range(len(steps_in_ten)):
+
+                # Start of bout: previous data point had < 10 steps and current data point has >= 10 steps
+                if steps_in_ten[i - 1] < 10 and steps_in_ten[i] >= 10:
+                    bout_starts.append(df_lankle.iloc[ankle_peaks[i]]["Timestamp"])
+                    # start_ind.append(i)
+                    start_ind.append(ankle_peaks[i])
+
+                    # Searches for end of bout
+                    for j in range(i, len(delta_t)):
+
+                        # Does nothing if time to next step < 5 seconds
+                        if delta_t[j] < 5:
+                            if j < len(delta_t):
+                                pass
+
+                        # Ends bout and stops loop if next step >= 5 seconds
+                        if delta_t[j] >= 5:
+                            bout_ends.append(df_lankle.iloc[ankle_peaks[j]]["Timestamp"])
+                            # end_ind.append(j)
+                            end_ind.append(ankle_peaks[j])
+                            break
+
+                    # Adds timestamp of final step if last step ends a bout
+                    if len(bout_starts) > len(bout_ends):
+                        bout_ends.append(df_lankle.iloc[ankle_peaks[-1]]["Timestamp"])
+                        end_ind.append(ankle_peaks[-1])
+
+            bout_steps = []
+
+            for s, e in zip(start_ind, end_ind):
+                bout_steps.append(len([i for i in ankle_peaks if s <= i <= e]))
+
+            return bout_starts, bout_ends, start_ind, end_ind, bout_steps
+
+        def orendurff_bouts():
+            """Finds periods of time in which steps (at least 2) occur in the subsequent 10-second window.
+               Bout ends if no steps detected in subsequent 10-second window."""
+
+            # Difference between consecutive bilateral ankle peaks
+            peak_diffs = [(ankle_peaks[i + 1] - ankle_peaks[i]) for i in range(len(ankle_peaks) - 1)]
+
+            # Bout starts: previous 10-second window has no step(s) and next 10-second window does
+            start_ind = [ankle_peaks[i] for i in range(len(peak_diffs)) if
+                         peak_diffs[i - 1] > 10 * self.lankle_samplerate >= peak_diffs[i]]
+
+            # Ends of bouts
+            end_ind = [ankle_peaks[i] for i in range(len(peak_diffs)) if
+                       peak_diffs[i] > 10 * self.lankle_samplerate >= peak_diffs[i - 1]]
+
+            # Inserts first step index as first bout if qualifies
+            if peak_diffs[0] < 10 * self.lankle_samplerate:
+                start_ind.insert(0, ankle_peaks[0])
+
+            # Appends final step as end of bout
+            if end_ind[-1] < start_ind[-1]:
+                end_ind.append(ankle_peaks[-1])
+
+            bout_starts = [df_lankle.iloc[i]["Timestamp"] for i in start_ind]
+            bout_ends = [df_lankle.iloc[i]["Timestamp"] for i in end_ind]
+
+            bout_steps = []
+
+            for s, e in zip(start_ind, end_ind):
+                bout_steps.append(len([i for i in ankle_peaks if s <= i <= e]))
+
+            return bout_starts, bout_ends, start_ind, end_ind, bout_steps
+
+        # Runs Prajapati algorithm
+        if algorithm.capitalize() == "Prajapati":
+            bout_starts, bout_ends, start_ind, end_ind, bout_steps = prajapati_bouts()
+
+        # Runs Orendurff algorithm
+        if algorithm.capitalize() == "Orendurff":
+            bout_starts, bout_ends, start_ind, end_ind, bout_steps = orendurff_bouts()
+
+        # Plotting ---------------------------------------------------------------------------------------------------
+        fig, ax1 = plt.subplots(1, figsize=(self.fig_width, self.fig_height))
+
+        ax1.set_title("{} bout detection: {} bout(s) "
+                      "\n({} axis, thresh={}, type={})".format(algorithm.capitalize(), len(bout_starts),
+                                                               axis, threshold, thresh_type))
+
+        ax1.plot(df_lankle["Timestamp"], [None for i in range(df_lankle.shape[0])])
+
+        ax1.plot(df_lankle["Timestamp"], df_lankle["{}_filt".format(axis)], color='black')
+
+        ax1.plot([df_lankle.iloc[i]["Timestamp"] for i in peaks_array[0]],
+                 [df_lankle["{}_filt".format(axis)].iloc[i] * 1.1 for i in peaks_array[0]],
+                 marker="v", color='black', linestyle="")
+
+        ax1.plot(df_rankle["Timestamp"], df_rankle["{}_filt".format(axis)], color='red')
+        ax1.plot([df_rankle.iloc[i]["Timestamp"] for i in peaks_array[1]],
+                 [df_rankle["{}_filt".format(axis)].iloc[i] * 1.1 for i in peaks_array[1]],
+                 marker="v", color='red', linestyle="")
+
         for s, e in zip(bout_starts, bout_ends):
-            plt.fill_between(x=[np.arange(0, df_lankle.shape[0])[s]/self.lankle_samplerate,
-                                np.arange(0, df_lankle.shape[0])[e]/self.lankle_samplerate],
-                             y1=plt.ylim()[0], y2=plt.ylim()[-1], color='grey', alpha=.5)
-            bout_lens.append(round((e-s)/self.lankle_samplerate, 1))
-            bout_steps.append(len([i for i in ankle_peaks if s <= i <= e]))
-            start_stamps.append(df_lankle.iloc[s]["Timestamp"])
-            end_stamps.append(df_lankle.iloc[e]["Timestamp"])
+            ax1.fill_between(x=[s, e], y1=min(df_lankle["{}_filt".format(axis)]),
+                             y2=max(df_lankle["{}_filt".format(axis)]),
+                             color='green', alpha=.5)
 
-        plt.xlabel("Seconds")
-        plt.ylabel("G")
-        plt.legend()
+        ax1.set_ylabel("G")
+
+        xfmt = mdates.DateFormatter("%H:%M:%S %p")
+        ax1.xaxis.set_major_formatter(xfmt)
 
         start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S.%f")
         stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S.%f")
 
-        f_name = self.check_file_overwrite("OrendurffBouts_{}Axis_{} "
-                                           "to {}".format(axis.capitalize(),
+        f_name = self.check_file_overwrite("{}Bouts_{}Axis_{} "
+                                           "to {}".format(algorithm.capitalize(),
+                                                          axis.capitalize(),
                                                           datetime.strftime(start_stamp,
                                                                             "%Y-%m-%d %H_%M_%S"),
                                                           datetime.strftime(stop_stamp,
@@ -1055,12 +1130,17 @@ class Wearables:
         plt.savefig(f_name)
         print("Plot saved as png ({})".format(f_name))
 
+        # High-level analytics ----------------------------------------------------------------------------------------
         # Creates output dictionary
+        bout_lens = [round((e - s) / self.lankle_samplerate, 1) for e, s in zip(end_ind, start_ind)]
         output_dict = {"N bouts": len(bout_starts),
                        "Steps per bout": bout_steps,
                        "Bout duration (s)": bout_lens}
 
-        output_df = pd.DataFrame(list(zip(np.arange(1, len(start_stamps)+1), start_stamps, end_stamps,
+        print("\nBout detection summary:")
+        print(output_dict)
+
+        output_df = pd.DataFrame(list(zip(np.arange(1, len(bout_starts)+1), bout_starts, bout_ends,
                                           bout_lens, bout_steps)),
                                  columns=["Bout", "Start", "End", "Duration (s)", "Steps"])
         output_df = output_df.set_index("Bout", drop=True)
@@ -1077,13 +1157,12 @@ x.filter_signal(device_type="accelerometer", type="bandpass", low_f=0.5, high_f=
 # x.plot_ankle_data(use_filtered=True)
 # x.plot_all_data(axis="mag", start=None, stop=None)
 
-# x.plot_detected_peaks(min_dist_ms=300, thresh_type="absolute", threshold=0.75, axis="y",
+# x.plot_detected_peaks(min_dist_ms=300, thresh_type="absolute", threshold=0.75, axis="mag",
 #                      start="2020-09-28 8:31:20.00", stop="2020-09-28 8:31:25.00")
 
-# UPDATES
+# x.plot_cycles(label1="Walk",start1="2020-09-28 8:15:20.00", stop1="2020-09-28 8:15:23.00",
+#              label2="Run", start2="2020-09-28 8:32:20.00", stop2="2020-09-28 8:32:23.00",
+#              axis="Y")
 
-"""x.plot_cycles(label1="Walk",start1="2020-09-28 8:15:20.00", stop1="2020-09-28 8:15:23.00",
-              label2="Run", start2="2020-09-28 8:32:20.00", stop2="2020-09-28 8:32:23.00",
-              axis="Y")"""
-
-orendurff_data = x.orendruff_bouts(start="2020-09-28 08:13:00.00", stop="2020-09-28 08:30:00.00")
+df = x.detect_bouts(algorithm="prajapati", axis="Mag", min_dist_ms=750, thresh_type="absolute", threshold=1.25,
+                    start="2020-09-28 08:35:00.00", stop="2020-09-28 08:45:30.00")
