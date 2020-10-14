@@ -3,21 +3,22 @@ from datetime import datetime  # module supplying classes for manipulating dates
 import matplotlib.pyplot as plt  # library for creating static, animated, and interactive visualizations
 import matplotlib.dates as mdates  # library for formatting plot axes labels as dates
 import os  # module allowing code to use operating system dependent functionality
-import matplotlib.ticker as ticker
+from datetime import timedelta
 
 
 class Wearables:
 
-    def __init__(self, leftwrist_filepath=None, leftankle_filepath=None, rightankle_filepath=None,
-                 fig_height=7, fig_width=12):
+    def __init__(self, leftwrist_filepath=None, leftankle_filepath=None, fig_height=7, fig_width=12):
 
         # Default values for objects ----------------------------------------------------------------------------------
-        self.lankle_fname = leftankle_filepath
-        self.rankle_fname = rightankle_filepath
+        self.ankle_fname = leftankle_filepath
         self.wrist_fname = leftwrist_filepath
 
         self.fig_height = fig_height
         self.fig_width = fig_width
+
+        self.start_stamp = None
+        self.stop_stamp = None
 
         self.epoched_df = None  # dataframe of all devices for one epoch length
 
@@ -27,10 +28,8 @@ class Wearables:
 
         # Methods and objects that are run automatically when class instance is created -------------------------------
 
-        self.df_lankle, self.lankle_samplerate = self.load_correct_file(filepath=self.lankle_fname,
-                                                                        f_type="Left Ankle")
-        self.df_rankle, self.rankle_samplerate = self.load_correct_file(filepath=self.rankle_fname,
-                                                                        f_type="Right Ankle")
+        self.df_ankle, self.ankle_samplerate = self.load_correct_file(filepath=self.ankle_fname,
+                                                                      f_type="Left Ankle")
         self.df_wrist, self.wrist_samplerate = self.load_correct_file(filepath=self.wrist_fname,
                                                                       f_type="Left Wrist")
 
@@ -123,7 +122,66 @@ class Wearables:
         if not file_exists:
             return filename
 
-    def recalculate_epoch_len(self, epoch_len, print_statement=True, write_file=False):
+    def get_timestamps(self, start=None, stop=None):
+
+        # If start/stop given as integer, sets start/stop stamps to minutes into collection ---------------------------
+        if (type(start) is int or type(start) is float) and (type(stop) is int or type(stop) is float):
+
+            data_type = "absolute"
+
+            start_stamp = self.df_ankle["Timestamp"].iloc[0] + timedelta(minutes=start)
+            stop_stamp = self.df_ankle["Timestamp"].iloc[0] + timedelta(minutes=stop)
+
+        # Formats arguments as datetimes -----------------------------------------------------------------------------
+
+        # If arguments are given and no previous region has been specified
+        else:
+
+            data_type = "timestamp"
+
+            if start is not None and self.start_stamp is None:
+                try:
+                    start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S.%f")
+
+            if stop is not None and self.stop_stamp is None:
+                try:
+                    stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S.%f")
+
+            # If arguments not given and no stamps from previous region
+            # Sets start/stop to first/last timestamp for hip or ankle data
+            if start is None and self.start_stamp is None:
+                start_stamp = self.df_ankle["Timestamp"].iloc[0]
+
+            if stop is None and self.stop_stamp is None:
+                stop_stamp = self.df_ankle["Timestamp"].iloc[-1]
+
+            # If arguments are not given and there are stamps from previous region
+            if start is None and self.start_stamp is not None:
+                print("Plotting previously-plotted region.")
+                start_stamp = self.start_stamp
+            if stop is None and self.stop_stamp is not None:
+                stop_stamp = self.stop_stamp
+
+            # If arguments given --> overrides stamps from previous region
+            if start is not None and self.start_stamp is not None:
+                try:
+                    start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S.%f")
+
+            if stop is not None and self.stop_stamp is not None:
+                try:
+                    stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S.%f")
+
+        return start_stamp, stop_stamp, data_type
+
+    def recalculate_epoch_len(self, epoch_len, print_statement=True, write_file=False, calculate_volume=True):
         """Method to re-epoch the 1-second epoch files into any epoch length. Also scales cutpoints and stores these
            values in self.cutpoint_dict.
            Calls self.calculate_activity_volume(). Volumes are not printed but are stored in self.activity_volume df
@@ -136,31 +194,19 @@ class Wearables:
         if print_statement:
             print("\nRecalculating epoch length to {} seconds...".format(epoch_len))
 
-        lankle_epoched = [None for i in range(self.df_lankle.shape[0])]
-        rankle_epoched = [None for i in range(self.df_rankle.shape[0])]
+        ankle_epoched = [None for i in range(self.df_ankle.shape[0])]
         wrist_epoched = [None for i in range(self.df_wrist.shape[0])]
 
         timestamps_found = False
 
-        if self.df_lankle is not None:
-            timestamps = self.df_lankle["Timestamp"].iloc[::epoch_len]
+        if self.df_ankle is not None:
+            timestamps = self.df_ankle["Timestamp"].iloc[::epoch_len]
             timestamps_found = True
             df_timestamps = timestamps
 
-            svm = [i for i in self.df_lankle["SVM"]]
+            svm = [i for i in self.df_ankle["SVM"]]
 
-            lankle_epoched = [sum(svm[i:i+epoch_len]) for i in range(0, self.df_lankle.shape[0], epoch_len)]
-
-        if self.df_rankle is not None:
-            timestamps = self.df_rankle["Timestamp"].iloc[::epoch_len]
-
-            if not timestamps_found:
-                df_timestamps = timestamps
-                timestamps_found = True
-
-            svm = [i for i in self.df_rankle["SVM"]]
-
-            rankle_epoched = [sum(svm[i:i + epoch_len]) for i in range(0, self.df_rankle.shape[0], epoch_len)]
+            ankle_epoched = [sum(svm[i:i+epoch_len]) for i in range(0, self.df_ankle.shape[0], epoch_len)]
 
         if self.df_wrist is not None:
             timestamps = self.df_wrist["Timestamp"].iloc[::epoch_len]
@@ -173,8 +219,8 @@ class Wearables:
             wrist_epoched = [sum(svm[i:i + epoch_len]) for i in range(0, self.df_wrist.shape[0], epoch_len)]
 
         # Combines all devices' counts into one dataframe
-        self.epoched_df = pd.DataFrame(list(zip(df_timestamps, lankle_epoched, rankle_epoched, wrist_epoched)),
-                                       columns=["Timestamp", "LAnkle", "RAnkle", "Wrist"])
+        self.epoched_df = pd.DataFrame(list(zip(df_timestamps, ankle_epoched, wrist_epoched)),
+                                       columns=["Timestamp", "LAnkle", "LWrist"])
 
         # Saves dataframe to csv
         if write_file:
@@ -190,26 +236,27 @@ class Wearables:
                               "Epoch length": epoch_len}
 
         # Tallies activity intensity totals
-        self.calculate_activity_volume()
+        if calculate_volume:
+            self.calculate_activity_volume()
 
     def calculate_activity_volume(self):
         """Calculates activity volume for one self.epoched_df. Called by self.recalculate_epoch_len and
            self.calculate_all_activity_volumes() methods.
         """
 
-        sed_epochs = self.epoched_df["Wrist"].loc[(self.epoched_df["Wrist"] < self.cutpoint_dict["Light"])].shape[0]
+        sed_epochs = self.epoched_df["LWrist"].loc[(self.epoched_df["LWrist"] < self.cutpoint_dict["Light"])].shape[0]
 
-        light_epochs = self.epoched_df["Wrist"].loc[(self.epoched_df["Wrist"] >=
+        light_epochs = self.epoched_df["LWrist"].loc[(self.epoched_df["LWrist"] >=
                                                      self.cutpoint_dict["Light"]) &
-                                                    (self.epoched_df["Wrist"] <
+                                                    (self.epoched_df["LWrist"] <
                                                      self.cutpoint_dict["Moderate"])].shape[0]
 
-        mod_epochs = self.epoched_df["Wrist"].loc[(self.epoched_df["Wrist"] >=
+        mod_epochs = self.epoched_df["LWrist"].loc[(self.epoched_df["LWrist"] >=
                                                    self.cutpoint_dict["Moderate"]) &
-                                                  (self.epoched_df["Wrist"] <
+                                                  (self.epoched_df["LWrist"] <
                                                    self.cutpoint_dict["Vigorous"])].shape[0]
 
-        vig_epochs = self.epoched_df["Wrist"].loc[(self.epoched_df["Wrist"] >=
+        vig_epochs = self.epoched_df["LWrist"].loc[(self.epoched_df["LWrist"] >=
                                                    self.cutpoint_dict["Vigorous"])].shape[0]
 
         activity_minutes = {"Sedentary": round(sed_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
@@ -219,16 +266,25 @@ class Wearables:
 
         self.activity_volume = activity_minutes
 
-    def plot_activity_counts(self):
+    def plot_activity_counts(self, start=None, stop=None):
         """Plots activity counts from all accelerometers from whatever last epoch length called in
         self.recalculate_epoch_len was. Requires that method was called at least once."""
 
         print("\nPlotting all {}-second epoch data...".format(self.cutpoint_dict["Epoch length"]))
 
-        fig, (ax1, ax2, ax3) = plt.subplots(3, sharex="col", figsize=(self.fig_width, self.fig_height))
+        start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
+
+        # Sets 'memory' values to current start/stop values
+        self.start_stamp = start_stamp
+        self.stop_stamp = stop_stamp
+
+        df = self.epoched_df.loc[(self.epoched_df["Timestamp"] > start_stamp) &
+                                 (self.epoched_df["Timestamp"] < stop_stamp)]
+
+        fig, (ax1, ax2) = plt.subplots(2, sharex="col", figsize=(self.fig_width, self.fig_height))
         plt.suptitle("Data scaled to {}-second epochs".format(self.cutpoint_dict["Epoch length"]))
 
-        ax1.plot(self.epoched_df["Timestamp"], self.epoched_df["Wrist"], color='dodgerblue', label="Wrist")
+        ax1.plot(df["Timestamp"], df["LWrist"], color='dodgerblue', label="Wrist")
         ax1.set_ylabel("Counts / {} seconds".format(self.cutpoint_dict["Epoch length"]))
         ax1.axhline(y=self.cutpoint_dict["Light"], color='green', linestyle='dashed', label="Light")
         ax1.axhline(y=self.cutpoint_dict["Moderate"], color='darkorange', linestyle='dashed', label="Mod.")
@@ -236,70 +292,85 @@ class Wearables:
 
         ax1.legend()
 
-        ax2.plot(self.epoched_df["Timestamp"], self.epoched_df["LAnkle"], color='red', label="LAnkle")
+        ax2.plot(df["Timestamp"], df["LAnkle"], color='red', label="LAnkle")
         ax2.set_ylabel("Counts / {} seconds".format(self.cutpoint_dict["Epoch length"]))
         ax2.legend()
 
-        ax3.plot(self.epoched_df["Timestamp"], self.epoched_df["RAnkle"], color='black', label="RAnkle")
-        ax3.set_ylabel("Counts / {} seconds".format(self.cutpoint_dict["Epoch length"]))
-        ax3.legend()
-
         xfmt = mdates.DateFormatter("%H:%M:%S %p")
-        ax3.xaxis.set_major_formatter(xfmt)
+        ax2.xaxis.set_major_formatter(xfmt)
         plt.xticks(rotation=45, fontsize=8)
 
-        f_name = self.check_file_overwrite("{}second_epochs".format(self.cutpoint_dict["Epoch length"]))
+        f_name = self.check_file_overwrite("{}second_epochs_{} "
+                                           "to {}".format(self.cutpoint_dict["Epoch length"],
+                                                          datetime.strftime(start_stamp, "%Y-%m-%d %H_%M_%S"),
+                                                          datetime.strftime(stop_stamp, "%Y-%m-%d %H_%M_%S")))
         plt.savefig(f_name)
         print("Plot saved as png ({})".format(f_name))
 
-    def plot_counts_demo(self):
-        """Method to plot 1, 15, and 60-second wrist epoch data as barplot to show
-           differences in counts and cutpoints
+    def plot_different_epoch_lengths(self, epoch_lens=(1, 15, 60), accel_location="Wrist"):
+        """Method to plot wrist or ankle epoch data in 3 epoch lengths as barplot to show
+           differences in counts and cutpoints (wrist only).
+
+            :argument
+            -epoch_lens: list of lenght 3 specifying epoch lengths. Keep to 60 seconds max.
+            -accel_location: "Wrist" or "Ankle"; which data to plot
         """
 
         fig, (ax1, ax2, ax3) = plt.subplots(3, sharex='col', figsize=(self.fig_width, self.fig_height))
         plt.suptitle("Demo: wrist activity counts during desk work (6-minute window)")
 
-        for i, epoch in enumerate([1, 15, 60]):
-            self.recalculate_epoch_len(epoch_len=epoch, print_statement=False)
+        for i, epoch in enumerate(epoch_lens):
+            self.recalculate_epoch_len(epoch_len=epoch, print_statement=False, calculate_volume=False)
 
             df = self.epoched_df.loc[(self.epoched_df["Timestamp"] >= "2020-10-08 9:31:00") &
                                      (self.epoched_df["Timestamp"] <= "2020-10-08 9:37:00")]
 
+            if accel_location.capitalize() == "Wrist":
+                data = df["LWrist"]
+            if accel_location.capitalize() == "Ankle":
+                data = df["LAnkle"]
+
             if i == 0:
-                ax1.set_title("1-second epochs")
-                ax1.bar(df["Timestamp"], df["Wrist"], edgecolor='black', color='dodgerblue', align='edge',
+                ax1.set_title("{}-second epochs".format(epoch))
+                ax1.bar(df["Timestamp"], data, edgecolor='black', color='dodgerblue', align='edge',
                         width=self.cutpoint_dict["Epoch length"] / 86400)
                 ax1.set_ylabel("Counts / {} seconds".format(self.cutpoint_dict["Epoch length"]))
-                ax1.axhline(y=self.cutpoint_dict["Light"], color='green', linestyle='dashed', label="Light")
-                ax1.axhline(y=self.cutpoint_dict["Moderate"], color='darkorange', linestyle='dashed', label="Mod.")
-                ax1.axhline(y=self.cutpoint_dict["Vigorous"], color='red', linestyle='dashed', label="Vig.")
-                ax1.legend()
+
+                if accel_location.capitalize() == "Wrist":
+                    ax1.axhline(y=self.cutpoint_dict["Light"], color='green', linestyle='dashed', label="Light")
+                    ax1.axhline(y=self.cutpoint_dict["Moderate"], color='darkorange', linestyle='dashed', label="Mod.")
+                    ax1.axhline(y=self.cutpoint_dict["Vigorous"], color='red', linestyle='dashed', label="Vig.")
+
+                    ax1.legend()
 
             if i == 1:
-                ax2.set_title("15-second epochs")
-                ax2.bar(df["Timestamp"], df["Wrist"], edgecolor='black', color='dodgerblue', align='edge',
+                ax2.set_title("{}-second epochs".format(epoch))
+                ax2.bar(df["Timestamp"], data, edgecolor='black', color='dodgerblue', align='edge',
                         width=self.cutpoint_dict["Epoch length"] / 86400)
                 ax2.set_ylabel("Counts / {} seconds".format(self.cutpoint_dict["Epoch length"]))
-                ax2.axhline(y=self.cutpoint_dict["Light"], color='green', linestyle='dashed')
-                ax2.axhline(y=self.cutpoint_dict["Moderate"], color='darkorange', linestyle='dashed')
-                ax2.axhline(y=self.cutpoint_dict["Vigorous"], color='red', linestyle='dashed')
+
+                if accel_location.capitalize() == "Wrist":
+                    ax2.axhline(y=self.cutpoint_dict["Light"], color='green', linestyle='dashed')
+                    ax2.axhline(y=self.cutpoint_dict["Moderate"], color='darkorange', linestyle='dashed')
+                    ax2.axhline(y=self.cutpoint_dict["Vigorous"], color='red', linestyle='dashed')
 
             if i == 2:
-                ax3.set_title("60-second epochs")
-                ax3.bar(df["Timestamp"], df["Wrist"], edgecolor='black', color='dodgerblue', align='edge',
+                ax3.set_title("{}-second epochs".format(epoch))
+                ax3.bar(df["Timestamp"], data, edgecolor='black', color='dodgerblue', align='edge',
                         width=self.cutpoint_dict["Epoch length"] / 86400)
                 ax3.set_ylabel("Counts / {} seconds".format(self.cutpoint_dict["Epoch length"]))
-                ax3.axhline(y=self.cutpoint_dict["Light"], color='green', linestyle='dashed')
-                ax3.axhline(y=self.cutpoint_dict["Moderate"], color='darkorange', linestyle='dashed')
-                ax3.axhline(y=self.cutpoint_dict["Vigorous"], color='red', linestyle='dashed')
+
+                if accel_location.capitalize() == "Wrist":
+                    ax3.axhline(y=self.cutpoint_dict["Light"], color='green', linestyle='dashed')
+                    ax3.axhline(y=self.cutpoint_dict["Moderate"], color='darkorange', linestyle='dashed')
+                    ax3.axhline(y=self.cutpoint_dict["Vigorous"], color='red', linestyle='dashed')
 
                 xfmt = mdates.DateFormatter("%H:%M:%S %p")
                 ax3.xaxis.set_major_formatter(xfmt)
                 plt.xticks(rotation=45, fontsize=8)
 
-        plt.savefig("Wrist_ActivityCounts_Demo.png")
-        print("\nSaved plot as Wrist_ActivityCounts_Demo.png")
+        plt.savefig("{}_ActivityCounts_Demo.png".format(accel_location))
+        print("\nSaved plot as {}_ActivityCounts_Demo.png".format(accel_location))
 
     def calculate_all_activity_volumes(self, save_file=False, show_plot=True):
         """Calculates activity volumes for 1, 5, 15, 30, and 60-second epochs. Able to plot results as barplot and to
@@ -371,17 +442,17 @@ class Wearables:
 
 
 x = Wearables(leftwrist_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 5/LWrist_Epoch1.csv",
-              leftankle_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 5/LAnkle_Epoch1.csv",
-              rightankle_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 5/RAnkle_Epoch1.csv")
+              leftankle_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 5/LAnkle_Epoch1.csv")
 
-# Bar plot to show how counts from different epoch compare. Shows scaled cutpoints.
-# x.plot_counts_demo()
+# Bar plot to show how counts from different epoch compare. Shows scaled cutpoints for wrist.
+# Pick data using accel_location="Wrist" or "Ankle". Able to pick 3 epoch lengths (epoch_lens=[a, b, c])
+# x.plot_different_epoch_lengths(epoch_lens=[1, 10, 60], accel_location="Ankle")
 
 # Able to pick any epoch length (seconds). To save as csv: write_file=True
-# x.recalculate_epoch_len(epoch_len=15, write_file=True)
+x.recalculate_epoch_len(epoch_len=15, write_file=False)
 
-# Plots most recent epoch length calculation. Saves plot.
-# x.plot_activity_counts()
+# Plots most recent epoch length calculation. Able to crop using start/stop timestamps. Saves plot.
+x.plot_activity_counts(start="2020-10-08 9:20:00", stop="2020-10-08 10:00:00")
 
 # Calculates activity volume for 1, 5, 15, 30, and 60-second epochs. Saves to csv if save_file=True.
-# x.calculate_all_activity_volumes(save_file=False, show_plot=True)
+# x.calculate_all_activity_volumes(save_file=True, show_plot=True)
