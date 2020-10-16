@@ -9,6 +9,9 @@ from datetime import timedelta
 class Wearables:
 
     def __init__(self, leftwrist_filepath=None, leftankle_filepath=None, fig_height=7, fig_width=12):
+        """Class that reads in one wrist and one ankle csv file that has been epoched into 1-second epochs.
+           Able to re-epoch into different epoch lengths and calculate activity volumes using scaled cutpoints.
+        """
 
         # Default values for objects ----------------------------------------------------------------------------------
         self.ankle_fname = leftankle_filepath
@@ -32,6 +35,9 @@ class Wearables:
                                                                       f_type="Left Ankle")
         self.df_wrist, self.wrist_samplerate = self.load_correct_file(filepath=self.wrist_fname,
                                                                       f_type="Left Wrist")
+
+        # Crops dataframes so length is a multiple of 1, 5, 10, 15, 30, and 60-second epochs
+        self.crop_dataframes()
 
         # Powell et al., 2016 cutpoints scaled to 75 Hz sampling rate and 1-second epoch
         # Original is 30 Hz and 15-second epochs
@@ -88,6 +94,18 @@ class Wearables:
         print("Import complete ({} seconds).".format(round(proc_time, 2)))
 
         return df, sample_rate
+
+    def crop_dataframes(self):
+
+        file_dur = self.df_wrist.__len__()
+
+        crop_ind = file_dur - file_dur % 60
+
+        self.df_wrist = self.df_wrist.iloc[:crop_ind]
+        self.df_ankle = self.df_ankle.iloc[:crop_ind]
+
+        print("\nCropped {} 1-second epochs off of data so that data length is a "
+              "multiple of all potential epoch lengths.".format(int(file_dur % 60)))
 
     @staticmethod
     def check_file_overwrite(filename):
@@ -181,40 +199,54 @@ class Wearables:
 
         return start_stamp, stop_stamp, data_type
 
-    def recalculate_epoch_len(self, epoch_len, print_statement=True, write_file=False, calculate_volume=True):
+    def recalculate_epoch_len(self, epoch_len, print_statement=True, write_file=False, calculate_volume=True,
+                              start=None, stop=None):
         """Method to re-epoch the 1-second epoch files into any epoch length. Also scales cutpoints and stores these
            values in self.cutpoint_dict.
            Calls self.calculate_activity_volume(). Volumes are not printed but are stored in self.activity_volume df
+           Able to crop data using start/stop timestamps.
 
         :arguments
         -epoch_len: desired epoch length in seconds
         -write_file: boolean of whether to save epoched_df as .csv
+        -start/stop: timestamp in format YYYY-mm-dd HH:MM:SS
         """
 
         if print_statement:
             print("\nRecalculating epoch length to {} seconds...".format(epoch_len))
 
-        ankle_epoched = [None for i in range(self.df_ankle.shape[0])]
-        wrist_epoched = [None for i in range(self.df_wrist.shape[0])]
+        if start is not None and stop is not None:
+            df_ankle = self.df_ankle.loc[(self.df_ankle["Timestamp"] >= start) &
+                                         (self.df_ankle["Timestamp"] < stop)]
+            df_wrist = self.df_wrist.loc[(self.df_wrist["Timestamp"] >= start) &
+                                         (self.df_wrist["Timestamp"] < stop)]
+
+        if start is None and stop is None:
+            df_ankle = self.df_ankle
+            df_wrist = self.df_wrist
+
+        ankle_epoched = [None for i in range(df_ankle.shape[0])]
+        wrist_epoched = [None for i in range(df_wrist.shape[0])]
 
         timestamps_found = False
 
-        if self.df_ankle is not None:
-            timestamps = self.df_ankle["Timestamp"].iloc[::epoch_len]
+        if df_ankle is not None:
+            timestamps = df_ankle["Timestamp"].iloc[::epoch_len]
+
             timestamps_found = True
             df_timestamps = timestamps
 
-            svm = [i for i in self.df_ankle["SVM"]]
+            svm = [i for i in df_ankle["SVM"]]
 
-            ankle_epoched = [sum(svm[i:i+epoch_len]) for i in range(0, self.df_ankle.shape[0], epoch_len)]
+            ankle_epoched = [sum(svm[i:i+epoch_len]) for i in range(0, df_ankle.shape[0], epoch_len)]
 
         if self.df_wrist is not None:
-            timestamps = self.df_wrist["Timestamp"].iloc[::epoch_len]
+            timestamps = df_wrist["Timestamp"].iloc[::epoch_len]
 
             if not timestamps_found:
                 df_timestamps = timestamps
 
-            svm = [i for i in self.df_wrist["SVM"]]
+            svm = [i for i in df_wrist["SVM"]]
 
             wrist_epoched = [sum(svm[i:i + epoch_len]) for i in range(0, self.df_wrist.shape[0], epoch_len)]
 
@@ -224,7 +256,7 @@ class Wearables:
 
         # Saves dataframe to csv
         if write_file:
-            self.epoched_df.to_csv("Epoch{}_All.csv".format(epoch_len), index=False)
+            self.epoched_df.to_csv("Epoch{}_All_{}_to_{}.csv".format(epoch_len, start, stop), index=False)
 
         # Scales cutpoints
         self.cutpoint_dict = {"Light": self.cutpoint_dict["Light"] *
@@ -237,27 +269,47 @@ class Wearables:
 
         # Tallies activity intensity totals
         if calculate_volume:
-            self.calculate_activity_volume()
+            self.calculate_activity_volume(start=start, stop=stop)
 
-    def calculate_activity_volume(self):
+    def calculate_activity_volume(self, start=None, stop=None):
         """Calculates activity volume for one self.epoched_df. Called by self.recalculate_epoch_len and
            self.calculate_all_activity_volumes() methods.
+           Able to crop data using start/stop.
+
+           :argument
+           -start/stop: timestamp in format YYYY-mm-dd HH:MM:SS
         """
 
-        sed_epochs = self.epoched_df["LWrist"].loc[(self.epoched_df["LWrist"] < self.cutpoint_dict["Light"])].shape[0]
+        if self.epoched_df is None:
+            self.epoched_df = pd.DataFrame(list(zip(self.df_wrist["Timestamp"],
+                                                    self.df_ankle["SVM"],
+                                                    self.df_wrist["SVM"])),
+                                           columns=["Timestamp", "LAnkle", "LWrist"])
 
-        light_epochs = self.epoched_df["LWrist"].loc[(self.epoched_df["LWrist"] >=
-                                                     self.cutpoint_dict["Light"]) &
-                                                    (self.epoched_df["LWrist"] <
-                                                     self.cutpoint_dict["Moderate"])].shape[0]
+        if start is not None and stop is None:
+            stop = self.epoched_df.iloc[-1]["Timestamp"]
 
-        mod_epochs = self.epoched_df["LWrist"].loc[(self.epoched_df["LWrist"] >=
-                                                   self.cutpoint_dict["Moderate"]) &
-                                                  (self.epoched_df["LWrist"] <
-                                                   self.cutpoint_dict["Vigorous"])].shape[0]
+        if start is not None and stop is not None:
+            df = self.epoched_df.loc[(self.epoched_df["Timestamp"] >= start) &
+                                     (self.epoched_df["Timestamp"] <= stop)]
 
-        vig_epochs = self.epoched_df["LWrist"].loc[(self.epoched_df["LWrist"] >=
-                                                   self.cutpoint_dict["Vigorous"])].shape[0]
+        if start is None and stop is None:
+            df = self.epoched_df
+
+        print("\nCalculating activity data from {} to {} "
+              "in {}-second epochs...".format(df.iloc[0]["Timestamp"],
+                                              df.iloc[-1]['Timestamp'],
+                                              self.cutpoint_dict["Epoch length"]))
+
+        sed_epochs = df["LWrist"].loc[(df["LWrist"] < self.cutpoint_dict["Light"])].shape[0]
+
+        light_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["Light"]) &
+                                        (df["LWrist"] < self.cutpoint_dict["Moderate"])].shape[0]
+
+        mod_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["Moderate"]) &
+                                      (df["LWrist"] < self.cutpoint_dict["Vigorous"])].shape[0]
+
+        vig_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["Vigorous"])].shape[0]
 
         activity_minutes = {"Sedentary": round(sed_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
                             "Light": round(light_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
@@ -265,21 +317,34 @@ class Wearables:
                             "Vigorous": round(vig_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2)}
 
         self.activity_volume = activity_minutes
+        print("Activity volume:")
+        print(self.activity_volume)
 
-    def plot_activity_counts(self, start=None, stop=None):
-        """Plots activity counts from all accelerometers from whatever last epoch length called in
-        self.recalculate_epoch_len was. Requires that method was called at least once."""
+    def plot_activity_counts(self, start=None, stop=None, epoch_len=15):
+        """Plots activity counts from both accelerometers. Saves plot.
+
+           :argument
+           -start/stop: timestamp in format YYYY-mm-dd HH:MM:SS
+           -epoch_len: epoch length in seconds
+        """
 
         print("\nPlotting all {}-second epoch data...".format(self.cutpoint_dict["Epoch length"]))
 
-        start_stamp, stop_stamp, data_type = self.get_timestamps(start, stop)
+        if epoch_len != self.cutpoint_dict["Epoch length"]:
+            self.recalculate_epoch_len(epoch_len=epoch_len, print_statement=True)
 
-        # Sets 'memory' values to current start/stop values
-        self.start_stamp = start_stamp
-        self.stop_stamp = stop_stamp
+        if self.epoched_df is None:
+            self.epoched_df = pd.DataFrame(list(zip(self.df_wrist["Timestamp"],
+                                                    self.df_ankle["SVM"],
+                                                    self.df_wrist["SVM"])),
+                                           columns=["Timestamp", "LAnkle", "LWrist"])
 
-        df = self.epoched_df.loc[(self.epoched_df["Timestamp"] > start_stamp) &
-                                 (self.epoched_df["Timestamp"] < stop_stamp)]
+        if start is None and stop is None:
+            start = self.epoched_df.iloc[0]["Timestamp"]
+            stop = self.epoched_df.iloc[-1]["Timestamp"]
+
+        df = self.epoched_df.loc[(self.epoched_df["Timestamp"] > start) &
+                                 (self.epoched_df["Timestamp"] < stop)]
 
         fig, (ax1, ax2) = plt.subplots(2, sharex="col", figsize=(self.fig_width, self.fig_height))
         plt.suptitle("Data scaled to {}-second epochs".format(self.cutpoint_dict["Epoch length"]))
@@ -302,17 +367,17 @@ class Wearables:
 
         f_name = self.check_file_overwrite("{}second_epochs_{} "
                                            "to {}".format(self.cutpoint_dict["Epoch length"],
-                                                          datetime.strftime(start_stamp, "%Y-%m-%d %H_%M_%S"),
-                                                          datetime.strftime(stop_stamp, "%Y-%m-%d %H_%M_%S")))
+                                                          datetime.strftime(start, "%Y-%m-%d %H_%M_%S"),
+                                                          datetime.strftime(stop, "%Y-%m-%d %H_%M_%S")))
         plt.savefig(f_name)
         print("Plot saved as png ({})".format(f_name))
 
     def plot_different_epoch_lengths(self, epoch_lens=(1, 15, 60), accel_location="Wrist"):
         """Method to plot wrist or ankle epoch data in 3 epoch lengths as barplot to show
-           differences in counts and cutpoints (wrist only).
+           differences in counts and cutpoints (wrist only). Saves plot.
 
             :argument
-            -epoch_lens: list of lenght 3 specifying epoch lengths. Keep to 60 seconds max.
+            -epoch_lens: list of length 3 specifying epoch lengths. Keep to 60 seconds max.
             -accel_location: "Wrist" or "Ankle"; which data to plot
         """
 
@@ -372,7 +437,7 @@ class Wearables:
         plt.savefig("{}_ActivityCounts_Demo.png".format(accel_location))
         print("\nSaved plot as {}_ActivityCounts_Demo.png".format(accel_location))
 
-    def calculate_all_activity_volumes(self, save_file=False, show_plot=True):
+    def calculate_all_activity_volumes(self, save_file=False, show_plot=True, start=None, stop=None):
         """Calculates activity volumes for 1, 5, 15, 30, and 60-second epochs. Able to plot results as barplot and to
            save results as .csv
 
@@ -385,7 +450,7 @@ class Wearables:
 
         volumes = []
         for epoch in [1, 5, 15, 30, 60]:
-            self.recalculate_epoch_len(epoch_len=epoch, print_statement=False)
+            self.recalculate_epoch_len(epoch_len=epoch, print_statement=False, start=start, stop=stop)
             volumes.append([i for i in self.activity_volume.values()])
 
         df_volume = pd.DataFrame(volumes)
@@ -436,7 +501,11 @@ class Wearables:
                     edgecolor='black', color=["maroon", "darkred", "firebrick", "red", "tomato"])
             plt.xlabel("Epoch length")
 
-            f_name = self.check_file_overwrite("ActivityVolumes_by_EpochLength")
+            if start is not None and stop is not None:
+                f_name = self.check_file_overwrite("ActivityVolumes_by_EpochLength_{}_to_{}".format(start, stop))
+            if start is None and stop is None:
+                f_name = self.check_file_overwrite("ActivityVolumes_by_EpochLength")
+
             plt.savefig(f_name)
             print("Plot saved as png ({})".format(f_name))
 
@@ -446,13 +515,16 @@ x = Wearables(leftwrist_filepath="/Users/kyleweber/Desktop/Python Scripts/Wearab
 
 # Bar plot to show how counts from different epoch compare. Shows scaled cutpoints for wrist.
 # Pick data using accel_location="Wrist" or "Ankle". Able to pick 3 epoch lengths (epoch_lens=[a, b, c])
-# x.plot_different_epoch_lengths(epoch_lens=[1, 10, 60], accel_location="Ankle")
+# x.plot_different_epoch_lengths(epoch_lens=[1, 10, 60], accel_location="Wrist")
 
 # Able to pick any epoch length (seconds). To save as csv: write_file=True
-x.recalculate_epoch_len(epoch_len=15, write_file=False)
+# x.recalculate_epoch_len(epoch_len=15, write_file=False)
+
+# Calculates activity volume using wrist cutpoints of current epoch length
+# x.calculate_activity_volume(start="2020-10-08 12:08:00", stop="2020-10-08 12:35:00")
 
 # Plots most recent epoch length calculation. Able to crop using start/stop timestamps. Saves plot.
-x.plot_activity_counts(start="2020-10-08 9:20:00", stop="2020-10-08 10:00:00")
+# x.plot_activity_counts(start=None, stop=None, epoch_len=15)
 
 # Calculates activity volume for 1, 5, 15, 30, and 60-second epochs. Saves to csv if save_file=True.
-# x.calculate_all_activity_volumes(save_file=True, show_plot=True)
+# x.calculate_all_activity_volumes(save_file=True, show_plot=True, start="2020-10-08 12:09:00", stop="2020-10-08 12:35:00")
