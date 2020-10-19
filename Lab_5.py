@@ -365,10 +365,20 @@ class Wearables:
         ax2.xaxis.set_major_formatter(xfmt)
         plt.xticks(rotation=45, fontsize=8)
 
-        f_name = self.check_file_overwrite("{}second_epochs_{} "
-                                           "to {}".format(self.cutpoint_dict["Epoch length"],
-                                                          datetime.strftime(start, "%Y-%m-%d %H_%M_%S"),
-                                                          datetime.strftime(stop, "%Y-%m-%d %H_%M_%S")))
+        try:
+            start_stamp = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+            stop_stamp = datetime.strptime(stop, "%Y-%m-%d %H:%M:%S")
+
+            f_name = self.check_file_overwrite("{}second_epochs_{} "
+                                               "to {}".format(self.cutpoint_dict["Epoch length"],
+                                                              datetime.strftime(start_stamp, "%Y-%m-%d %H_%M_%S"),
+                                                              datetime.strftime(stop_stamp, "%Y-%m-%d %H_%M_%S")))
+        except TypeError:
+            f_name = self.check_file_overwrite("{}second_epochs_{} "
+                                               "to {}".format(self.cutpoint_dict["Epoch length"],
+                                                              datetime.strftime(start, "%Y-%m-%d %H_%M_%S"),
+                                                              datetime.strftime(stop, "%Y-%m-%d %H_%M_%S")))
+
         plt.savefig(f_name)
         print("Plot saved as png ({})".format(f_name))
 
@@ -524,7 +534,7 @@ x = Wearables(leftwrist_filepath="/Users/kyleweber/Desktop/Python Scripts/Wearab
 # x.calculate_activity_volume(start="2020-10-08 12:08:00", stop="2020-10-08 12:35:00")
 
 # Plots most recent epoch length calculation. Able to crop using start/stop timestamps. Saves plot.
-# x.plot_activity_counts(start=None, stop=None, epoch_len=15)
+# x.plot_activity_counts(start="2020-10-08 11:31:00", stop="2020-10-08 12:00:00", epoch_len=15)
 
 # Calculates activity volume for 1, 5, 15, 30, and 60-second epochs. Saves to csv if save_file=True.
 # x.calculate_all_activity_volumes(save_file=True, show_plot=True, start="2020-10-08 12:09:00", stop="2020-10-08 12:35:00")
