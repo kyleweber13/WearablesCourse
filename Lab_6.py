@@ -16,8 +16,7 @@ import heartpy
 
 class Data:
 
-    def __init__(self, physionet_file="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/s3_walk",
-                 fig_width=10, fig_height=6):
+    def __init__(self, physionet_file=None, fig_width=10, fig_height=6):
 
         self.physionet_file = physionet_file
         self.fig_width = fig_width
@@ -39,6 +38,7 @@ class Data:
 
         self.ecg_dict = {}
         self.ppg_dict = {}
+        self.units_dict = {}
 
         self.import_data()
 
@@ -46,6 +46,13 @@ class Data:
         """Imports data from physionet database."""
 
         data = wfdb.rdrecord(self.physionet_file)
+
+        units = data.units
+
+        self.units_dict = {"ECG": units[0], "PPG": units[1],
+                           "Gyro_X": units[2], "Gyro_Y": units[3], "Gyro_Z": units[4],
+                           "Accel_X": units[5], "Accel_Y": units[6], "Accel_Z": units[7]}
+
         self.df = pd.DataFrame(data.p_signal, columns=data.sig_name)
         self.df.insert(0, "Timestamp", [i / 256 for i in range(self.df.shape[0])])
 
@@ -126,7 +133,7 @@ class Data:
         if data_type == "ECG":
             self.filter_dict["ECG_low"] = low_f
             self.filter_dict["ECG_high"] = high_f
-            self.filter_dict["ECGG_type"] = filter_type
+            self.filter_dict["ECG_type"] = filter_type
 
         nyquist_freq = 0.5 * sample_f
 
@@ -209,7 +216,7 @@ class Data:
             self.df["Accel_Y_Filt"] = filter_data(data=self.df["Accel_Y"], sample_f=sample_f)
             self.df["Accel_Z_Filt"] = filter_data(data=self.df["Accel_Z"], sample_f=sample_f)
 
-    def ecg_find_and_plot_peaks(self, start=None, stop=None, show_plot=True):
+    def ecg_find_and_plot_peaks(self, start=None, stop=None, show_plot=True, save_plot=True):
         """Plots raw and filtered ECG data with detected peaks.
 
             :argument
@@ -258,7 +265,13 @@ class Data:
             ax3.set_xlabel("Seconds")
             ax3.set_ylim(40, 180)
 
-    def plot_ecg_steps(self, start=None, stop=None):
+            if save_plot:
+                f_name = self.check_file_overwrite("ECGPeaks_{}to{}seconds".format(start, stop))
+
+                plt.savefig(f_name)
+                print("Plot saved as png ({})".format(f_name))
+
+    def plot_ecg_steps(self, start=None, stop=None, save_plot=True):
         """Generates plots that shows steps involved in ECG peak detection algorithm.
 
             :argument
@@ -276,7 +289,7 @@ class Data:
             pass
 
         if self.start_stamp != start or self.stop_stamp != stop or self.start_stamp is None or self.stop_stamp is None:
-            self.ecg_find_and_plot_peaks(start=start, stop=stop, show_plot=False)
+            self.ecg_find_and_plot_peaks(start=start, stop=stop, show_plot=False, save_plot=False)
 
         if self.start_stamp is None and self.stop_stamp is None:
             self.start_stamp = 0
@@ -324,6 +337,13 @@ class Data:
         ax4.set_ylabel("Voltage")
         ax4.set_xlabel("Seconds into collection")
         ax4.legend(loc='center right')
+
+        if save_plot:
+            if save_plot:
+                f_name = self.check_file_overwrite("ECGSteps_{}to{}seconds".format(start, stop))
+
+                plt.savefig(f_name)
+                print("Plot saved as png ({})".format(f_name))
 
     def detect_ecg_peaks(self, start=None, stop=None):
         """Pan-Tompkins peak detection algorithm (1985).
@@ -458,15 +478,9 @@ class Data:
 
         filt_peaks = panPeakDetect(detection=np.asarray([i for i in filtered_squared]), fs=256)
 
-        average_hr = (len(filt_peaks) - 1) / (df.shape[0] / 256) * 60
-        print("-Found {} peaks in {} seconds.".format(len(filt_peaks), round(df.shape[0]/256), 1))
-        print("    -Average HR is {} bpm.".format(round(average_hr, 1)))
-
         # Calcalates RR sd in ms
         rr_ints = [1000*(r2 - r1)/256 for r1, r2 in zip(filt_peaks[:], filt_peaks[1:])]
         rr_sd = np.std(rr_ints)
-
-        print("    -SD of RR intervals is {} ms.".format(round(rr_sd, 1)))
 
         self.ecg_dict["Data"] = [i for i in df["ECG"]]
         self.ecg_dict["Data_Filt"] = [i for i in df["ECG_Filt"]]
@@ -477,7 +491,14 @@ class Data:
         self.ecg_dict["RR ints"] = rr_ints
         self.ecg_dict["Beat HR"] = [round(1000 / r * 60, 1) for r in rr_ints]
 
-    def plot_ppg_filter(self, start=None, stop=None):
+        average_hr = (len(filt_peaks) - 1) / (df.shape[0] / 256) * 60
+        print("-Found {} peaks in {} seconds.".format(len(filt_peaks), round(df.shape[0]/256), 1))
+        print("    -Average HR is {} bpm.".format(round(average_hr, 1)))
+        print("    -Max instantaneous HR is {} bpm.".format(max(self.ecg_dict["Beat HR"]), 1))
+        print("    -Min instantaneous HR is {} bpm.".format(min(self.ecg_dict["Beat HR"]), 1))
+        print("    -SD of RR intervals (HRV) is {} ms.".format(round(rr_sd, 1)))
+
+    def plot_ppg_filter(self, start=None, stop=None, save_plot=True):
         """Plots raw and filtered PPG data.
 
             :argument
@@ -513,7 +534,14 @@ class Data:
 
         ax2.set_xlabel("Seconds into collection")
 
-    def plot_ppg_steps(self, start=None, stop=None):
+        if save_plot:
+            f_name = self.check_file_overwrite("PPG_{}Filter_"
+                                               "{}to{}seconds".format(self.filter_dict["PPG_type"].capitalize(),
+                                                                      start, stop))
+            plt.savefig(f_name + ".png")
+            print("Plot saved as png ({})".format(f_name))
+
+    def plot_ppg_steps(self, start=None, stop=None, save_plot=True):
         """Generates plots that shows steps involved in PPG peak detection algorithm.
 
                :argument
@@ -526,12 +554,13 @@ class Data:
             print("-Filtered PPG data is required. Please run filtering function and try again.")
             return None
 
+        if start is not None and stop is not None:
+            df = self.df["PPG_Filt"].loc[(self.df["Timestamp"] >= start) &
+                                         (self.df["Timestamp"] <= stop)]
         if start is None and stop is None:
             start = 0
-            stop = int(self.df.shape[0]-5)
-
-        df = self.df["PPG_Filt"].loc[(self.df["Timestamp"] >= start) &
-                                     (self.df["Timestamp"] <= stop)]
+            stop = int(self.df.shape[0]/256)
+            df = self.df["PPG_Filt"]
 
         d = [p2 - p1 for p1, p2 in zip(df.iloc[:], df.iloc[1:])]
         d2 = [i * i for i in d]
@@ -555,6 +584,12 @@ class Data:
 
         ax4.legend()
         ax4.set_xlabel("Seconds into collection")
+
+        if save_plot:
+            f_name = self.check_file_overwrite("PPGPeaks_{}to{}seconds".format(start, stop))
+
+            plt.savefig(f_name)
+            print("Plot saved as png ({})".format(f_name))
 
     def process_ppg(self, show_plot=True, start=None, stop=None, remove_close_peaks=True,
                     use_heartpy=False, threshold=350):
@@ -630,14 +665,23 @@ class Data:
         self.ppg_dict["Peaks"] = final_peaks
 
         print("\nRunning PPG peak detection...")
+
+        if len(final_peaks) == 0 and not use_heartpy:
+            print("-No peaks were found. Try again with a lower threshold.")
+
         print("-Found {} peaks in {} seconds.".format(len(final_peaks), round(len(filt_data)/256), 1))
         print("    -Average HR is {} bpm.".format(round(np.mean(self.ppg_dict["Beat HR"]), 1)))
+        try:
+            print("    -Max instantaneous HR is {} bpm.".format(max(self.ppg_dict["Beat HR"]), 1))
+            print("    -Min instantaneous HR is {} bpm.".format(min(self.ppg_dict["Beat HR"]), 1))
+        except ValueError:
+            print("    -No peaks were found; cannot calculate max/min HR")
 
         # Calcalates RR sd in ms
         rr_ints = [1000*(r2 - r1)/256 for r1, r2 in zip(final_peaks[:], final_peaks[1:])]
         rr_sd = np.std(rr_ints)
 
-        print("    -SD of RR intervals is {} ms.".format(round(rr_sd, 1)))
+        print("    -SD of RR intervals (HRV) is {} ms.".format(round(rr_sd, 1)))
 
         # PLOTTING ----------------------------------------------------------------------------------------------------
         if show_plot:
@@ -657,12 +701,10 @@ class Data:
             ax3.legend()
             ax3.set_ylabel("HR (bpm)")
             ax3.set_xlabel("Seconds")
-            plt.ylim(40, 180)
+            plt.ylim(30, 180)
 
-        return wd, m, final_peaks
-
-    def compare_ecg_ppg_hr(self, start=None, stop=None, remove_close_ppg_peaks=True,
-                           use_heartpy=False, threshold=350, plot_processed=False, show_plot=True):
+    def compare_ecg_ppg_hr(self, start=None, stop=None, remove_close_ppg_peaks=True, use_heartpy=False,
+                           threshold=350, plot_processed=False, show_plot=True, save_plot=True):
         """Plots ECG and PPG data with detected peaks. Bottom plot overlays beat-to-beat HR calculated by each dataset.
 
             :argument
@@ -727,6 +769,23 @@ class Data:
             ax3.set_ylabel("HR (bpm)")
             ax3.legend()
 
+            if save_plot:
+                if plot_processed:
+                    if use_heartpy:
+                        f_name = self.check_file_overwrite("ECG_PPG_Comp_HeartPy_"
+                                                           "ProcessedData_{}to{}seconds".format(start, stop))
+                    if not use_heartpy:
+                        f_name = self.check_file_overwrite("ECG_PPG_Comp_"
+                                                           "ProcessedData_{}to{}seconds".format(start, stop))
+                if not plot_processed:
+                    if use_heartpy:
+                        f_name = self.check_file_overwrite("ECG_PPG_Comp_HeartPy_{}to{}seconds".format(start, stop))
+                    if not use_heartpy:
+                        f_name = self.check_file_overwrite("ECG_PPG_Comp_{}to{}seconds".format(start, stop))
+
+                plt.savefig(f_name)
+                print("Plot saved as png ({})".format(f_name))
+
     def plot_ecg_ppg_fft(self):
         """Plots FFT of entire file for ECG and PPG data. Runs .15Hz highpass filter to remove DC"""
 
@@ -768,14 +827,19 @@ class Data:
                          reducing frequency resolution. Reverse is true for small multipliers
         """
 
+        print("\nRunning Short Time Fourier Transform...")
+
         if start is not None and stop is not None:
-            ecg = self.df.loc[(self.df["Timestamp"] >= start) & (self.df["Timestamp"] <= stop)]["ECG"]
+            ecg = self.df.loc[(self.df["Timestamp"] >= start) & (self.df["Timestamp"] <= stop)]["ECG_Filt"]
             ppg = self.df.loc[(self.df["Timestamp"] >= start) & (self.df["Timestamp"] <= stop)]["PPG"]
         if start is None and stop is None:
-            ecg = self.df["ECG"]
+            ecg = self.df["ECG_Filt"]
             ppg = self.df["PPG"]
 
         f, t, Zxx = scipy.signal.stft(x=ppg, fs=256, nperseg=int(256 / multiplier), window='hamming')
+
+        print("-Frequency resolution = {} Hz.".format(round(256 / (256 / multiplier), 1)))
+        print("-Temporal resolution = {} ms.".format())
 
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, sharex='col', figsize=(self.fig_width, self.fig_height))
         plt.subplots_adjust(hspace=.4)
@@ -797,12 +861,16 @@ class Data:
         ax4.set_ylim(-.1, 20)
         ax4.set_xlabel('Seconds')
 
-    def window_heart_rates(self, window_len=15):
+    def window_heart_rates(self, window_len=15, save_plot=True):
         """Calculates and plots HR averaged over specified window length. Requires already-processed data."""
 
-        if "Peaks" not in self.ppg_dict.keys() or "Peaks" not in self.ecg_dict.keys():
-            print("-HR data is missing. Please process data and try again. ")
-            return None
+        if "Peaks" not in self.ppg_dict.keys():
+            self.process_ppg(show_plot=False, start=None, stop=None, use_heartpy=True,
+                             remove_close_peaks=True)
+            print("-PPG HR data was missing. Processing using HeartPy...")
+
+        if "Peaks" not in self.ecg_dict.keys():
+            self.detect_ecg_peaks(start=None, stop=None)
 
         ecg = self.ecg_dict["Peaks"]
         ppg = self.ppg_dict["Peaks"]
@@ -887,9 +955,22 @@ class Data:
         ax2.set_ylabel("Δ bpm (ECG - PPG)")
         ax2.set_xlabel("Mean HR (bpm)")
 
-        # ax2.legend(loc='best')
+        if save_plot:
+            f_name = self.check_file_overwrite("WindowedHR_Comp_{}sec".format(window_len))
 
-    def compare_accel_gyro(self, start=None, stop=None, use_filtered=False):
+            plt.savefig(f_name)
+            print("Plot saved as png ({})".format(f_name))
+
+    def compare_accel_gyro(self, start=None, stop=None, use_filtered=False, sort_by="device"):
+        """Plots accelerometer and gyroscope data.
+
+           :argument
+           -start/stop: data cropping in seconds
+           -use_filtered: boolean whether to show raw or filtered data
+           -sort_by: whether to plot with the same device on each subplot or each axis
+                     -"device": two subplots - one for accel and one for gyro
+                     -"axis": three subplots - same axis for accel and gyro on same subplot
+        """
 
         if start is not None and stop is not None:
             df = self.df.loc[(self.df["Timestamp"] >= start) & (self.df["Timestamp"] <= stop)]
@@ -901,26 +982,74 @@ class Data:
         if not use_filtered:
             col_suffix = ""
 
-        fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
+        if sort_by == "device":
+            fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
 
-        ax1.set_title("Accelerometer" + col_suffix)
-        ax1.plot(np.arange(0, df.shape[0]) / 256, df["Accel_X" + col_suffix], color='black', label="X")
-        ax1.plot(np.arange(0, df.shape[0]) / 256, df["Accel_Y" + col_suffix], color='red', label="Y")
-        ax1.plot(np.arange(0, df.shape[0]) / 256, df["Accel_Z" + col_suffix], color='dodgerblue', label="Z")
-        ax1.legend()
-        ax1.set_ylabel("G")
+            ax1.set_title("Accelerometer" + col_suffix)
+            ax1.plot(np.arange(0, df.shape[0]) / 256, df["Accel_X" + col_suffix], color='black', label="X")
+            ax1.plot(np.arange(0, df.shape[0]) / 256, df["Accel_Y" + col_suffix], color='red', label="Y")
+            ax1.plot(np.arange(0, df.shape[0]) / 256, df["Accel_Z" + col_suffix], color='dodgerblue', label="Z")
+            ax1.legend()
+            ax1.set_ylabel("m/s^2")
 
-        ax2.set_title("Gyroscope" + col_suffix)
-        ax2.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_X" + col_suffix], color='black', label="X")
-        ax2.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_Y" + col_suffix], color='red', label="Y")
-        ax2.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_Z" + col_suffix], color='dodgerblue', label="Z")
-        ax2.legend()
-        ax2.set_ylabel("Degrees per second")
+            ax2.set_title("Gyroscope" + col_suffix)
+            ax2.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_X" + col_suffix], color='black', label="X")
+            ax2.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_Y" + col_suffix], color='red', label="Y")
+            ax2.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_Z" + col_suffix], color='dodgerblue', label="Z")
+            ax2.legend()
+            ax2.set_ylabel("Degrees per second")
 
-        ax2.set_xlabel("Seconds")
+            ax2.set_xlabel("Seconds")
+
+        if sort_by == "axis":
+
+            fig, (ax1, ax2, ax3) = plt.subplots(3, sharex='col', figsize=(self.fig_width, self.fig_height))
+            plt.subplots_adjust(hspace=.25)
+
+            # X axes
+            ax1.set_title("X{} axis".format(col_suffix))
+            ax1.plot(np.arange(0, df.shape[0]) / 256, df["Accel_X" + col_suffix], color='black', label="Accel")
+            ax1.set_ylabel(self.units_dict["Accel_X"])
+
+            ax4 = ax1.twinx()
+            ax4.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_X" + col_suffix], color='dodgerblue', label="Gyro")
+            ax4.set_ylabel(self.units_dict["Gyro_X"], color='dodgerblue')
+            ax4.tick_params(axis='y', labelcolor="dodgerblue")
+
+            # Y axes
+            ax2.set_title("Y{} axis".format(col_suffix))
+            ax2.plot(np.arange(0, df.shape[0]) / 256, df["Accel_Y" + col_suffix], color='black', label="Accel")
+            ax2.set_ylabel(self.units_dict["Accel_Y"])
+
+            ax5 = ax2.twinx()
+            ax5.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_Y" + col_suffix], color='dodgerblue', label="Gyro")
+            ax5.set_ylabel(self.units_dict["Gyro_Y"], color='dodgerblue')
+            ax5.tick_params(axis='y', labelcolor="dodgerblue")
+
+            # Z axes
+            ax3.set_title("Z{} axis".format(col_suffix))
+            ax3.plot(np.arange(0, df.shape[0]) / 256, df["Accel_Z" + col_suffix], color='black', label="Accel")
+            ax3.set_ylabel(self.units_dict["Accel_X"])
+
+            ax5 = ax3.twinx()
+            ax5.plot(np.arange(0, df.shape[0]) / 256, df["Gyro_Z" + col_suffix], color='dodgerblue', label="Gyro")
+            ax5.set_ylabel(self.units_dict["Gyro_Z"], color='dodgerblue')
+            ax5.tick_params(axis='y', labelcolor="dodgerblue")
+
+            ax3.set_xlabel("Seconds")
+
+        if use_filtered:
+            f_name = self.check_file_overwrite("AccelGyro_Filt_By{}Comp_{}to{}seconds".format(sort_by.capitalize(),
+                                                                                              start, stop))
+        if not use_filtered:
+            f_name = self.check_file_overwrite("AccelGyro_Raw_By{}Comp_{}to{}seconds".format(sort_by.capitalize(),
+                                                                                             start, stop))
+
+        plt.savefig(f_name)
+        print("Plot saved as png ({})".format(f_name))
 
 
-x = Data()
+x = Data(physionet_file="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/s3_walk")
 
 # ================================================= PPG-only data =====================================================
 
@@ -928,12 +1057,12 @@ x = Data()
 x.df["PPG_Filt"] = x.filter_signal(data=x.df["PPG"], filter_type="bandpass", low_f=0.67, high_f=12, sample_f=256)
 
 # Plots raw and filtered PPG data
-# x.plot_ppg_filter(start=15, stop=45)
+# x.plot_ppg_filter(start=15, stop=45, save_plot=True)
 
 # Plots peak detection processing steps in specified region
-# x.plot_ppg_steps(start=15, stop=60)
+# x.plot_ppg_steps(start=30, stop=60)
 
-# x.process_ppg(start=5, stop=280, show_plot=True, use_heartpy=False, threshold=350, remove_close_peaks=True)
+# x.process_ppg(start=5, stop=265, show_plot=True, use_heartpy=False, threshold=300, remove_close_peaks=True)
 
 # ================================================= ECG-only data =====================================================
 
@@ -942,21 +1071,27 @@ x.df["ECG_Filt"] = x.filter_signal(data=x.df["ECG"], filter_type="bandpass", low
 
 # Finds peaks and plots raw + filtered data with peaks + beat-to-beat HR in specified region
 # Prints number of peaks found, average HR and RR SD
-# x.ecg_find_and_plot_peaks(start=5, stop=280, show_plot=True)
+# x.ecg_find_and_plot_peaks(start=5, stop=45, show_plot=True, save_plot=False)
 
 # Plots peak detection processing steps in specified region
-# x.plot_ecg_steps(start=30, stop=60)
+# x.plot_ecg_steps(start=30, stop=60, save_plot=True)
 
 # ================================================ ECG and PPG data ===================================================
 
 # Data, peak, and beat-by-beat HR comparison between PPG and ECG
-# x.compare_ecg_ppg_hr(start=5, stop=280, remove_close_ppg_peaks=True, use_heartpy=False, threshold=350, plot_processed=False, show_plot=False)
+# x.compare_ecg_ppg_hr(start=5, stop=280, remove_close_ppg_peaks=True, use_heartpy=True, threshold=350,
+#                       plot_processed=False, show_plot=True, save_plot=True)
 
 # Plots FFT of entire file for raw PPG and ECG data
 # x.plot_ecg_ppg_fft()
 
 # Plots STFT for PPG and ECG data for specified region
+
+# High temporal resolution (50 msec); low frequency resolution (10 Hz)
 # x.plot_ecg_ppg_stft(multiplier=10, start=5, stop=25)
+
+# Low temporal resolution (500 msec); high frequency resolution (1 Hz)
+# x.plot_ecg_ppg_stft(multiplier=1, start=5, stop=25)
 
 # Plots HR averaged over specified window
 # x.window_heart_rates(window_len=30)
@@ -968,5 +1103,4 @@ x.filter_imu_signal(data_type="accel", filter_type="highpass", high_f=.1, sample
 x.filter_imu_signal(data_type="gyro", filter_type="bandpass", low_f=0.5, high_f=3, sample_f=256)
 
 # Plots raw or filtered gyroscope and accelerometer data in specified region
-x.compare_accel_gyro(start=5, stop=20, use_filtered=False)
-
+x.compare_accel_gyro(start=5, stop=35, use_filtered=True, sort_by="device")
