@@ -20,14 +20,10 @@ class Data:
         self.fig_height = fig_height
         self.fig_width = fig_width
 
-        self.start_stamp = None
-        self.stop_stamp = None
-
         self.epoched_df = None  # dataframe of all devices for one epoch length
 
         self.activity_volume = None  # activity volume for one epoch length
-
-        self.df_all_volumes = None  # activity volumes for 1, 5, 15, 30, and 60-second epochs
+        self.activity_df = None
 
         # Methods and objects that are run automatically when class instance is created -------------------------------
 
@@ -39,9 +35,6 @@ class Data:
                                                                         f_type="Right Ankle")
         self.df_rwrist, self.rwrist_samplerate = self.load_correct_file(filepath=self.rwrist_fname,
                                                                         f_type="Right Wrist")
-
-        # Crops dataframes so length is a multiple of 1, 5, 10, 15, 30, and 60-second epochs
-        # self.crop_dataframes()
 
         # Powell et al., 2016 cutpoints scaled to 75 Hz sampling rate and 1-second epoch
         # Original is 30 Hz and 15-second epochs
@@ -280,7 +273,7 @@ class Data:
         # Combines all devices' counts into one dataframe
         self.epoched_df = pd.DataFrame(list(zip(df_timestamps, lankle_epoched, rankle_epoched,
                                                 lwrist_epoched, rwrist_epoched)),
-                                       columns=["Timestamp", "LAnkle", "Rankle", "LWrist", "RWrist"])
+                                       columns=["Timestamp", "LAnkle", "RAnkle", "LWrist", "RWrist"])
 
         # Saves dataframe to csv
         if write_file:
@@ -304,9 +297,6 @@ class Data:
         # Tallies activity intensity totals
         if calculate_volume:
             self.calculate_activity_volume(start=start, stop=stop)
-
-    def scale_cutpoints(self):
-        pass
 
     def calculate_activity_volume(self, start=None, stop=None):
         """Calculates activity volume for one self.epoched_df. Called by self.recalculate_epoch_len and
@@ -352,7 +342,6 @@ class Data:
         nd_vig_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["NonDomVigorous"])].shape[0]
 
         # Dominant (right) wrist --------------------------------------------------------------------------------------
-
         d_sed_epochs = df["LWrist"].loc[(df["LWrist"] < self.cutpoint_dict["DomLight"])].shape[0]
 
         d_light_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["DomLight"]) &
@@ -363,6 +352,7 @@ class Data:
 
         d_vig_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["DomVigorous"])].shape[0]
 
+        # Data storage ------------------------------------------------------------------------------------------------
         activity_minutes = {"Sedentary_ND": round(nd_sed_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
                             "Sedentary_Dom": round(d_sed_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
                             "Light_ND": round(nd_light_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
@@ -370,22 +360,219 @@ class Data:
                             "Moderate_ND": round(nd_mod_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
                             "Moderate_Dom": round(d_mod_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
                             "Vigorous_ND": round(nd_vig_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
-                            "Vigorous_Dom": round(d_vig_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2)
+                            "Vigorous_Dom": round(d_vig_epochs / (60 / self.cutpoint_dict["Epoch length"]), 2),
                             }
+
+        activity_minutes["MVPA_ND"] = activity_minutes["Moderate_ND"] + activity_minutes["Vigorous_ND"]
+        activity_minutes["MVPA_Dom"] = activity_minutes["Moderate_Dom"] + activity_minutes["Vigorous_Dom"]
 
         self.activity_volume = activity_minutes
         nd = [activity_minutes["Sedentary_ND"], activity_minutes["Light_ND"],
-              activity_minutes["Moderate_ND"], activity_minutes["Vigorous_ND"]]
+              activity_minutes["Moderate_ND"], activity_minutes["Vigorous_ND"], activity_minutes["MVPA_ND"]]
         d = [activity_minutes["Sedentary_Dom"], activity_minutes["Light_Dom"],
-             activity_minutes["Moderate_Dom"], activity_minutes["Vigorous_Dom"]]
-        activity_df = pd.DataFrame(list(zip(nd, d)), columns=["NonDominant", "Dominant"])
-        activity_df.index = ["Sedentary", "Light", "Moderate", "Vigorous"]
+             activity_minutes["Moderate_Dom"], activity_minutes["Vigorous_Dom"], activity_minutes["MVPA_Dom"]]
+
+        self.activity_df = pd.DataFrame(list(zip(nd, d)), columns=["NonDominant", "Dominant"])
+        self.activity_df.index = ["Sedentary", "Light", "Moderate", "Vigorous", "MVPA"]
+
+        self.activity_df["NonDominant%"] = 100 * self.activity_df["NonDominant"] / \
+                                           sum(self.activity_df["NonDominant"].loc[["Sedentary", "Light",
+                                                                                    "Moderate", "Vigorous"]])
+        self.activity_df["Dominant%"] = 100 * self.activity_df["Dominant"] / \
+                                        sum(self.activity_df["Dominant"].loc[["Sedentary", "Light",
+                                                                              "Moderate", "Vigorous"]])
+
+        self.activity_df["NonDominant%"] = self.activity_df["NonDominant%"].round(2)
+        self.activity_df["Dominant%"] = self.activity_df["Dominant%"].round(2)
 
         print("\nActivity volume:")
-        print(activity_df)
+        print(self.activity_df)
 
-    def plot_data(self):
-        pass
+    def plot_data(self, epoch_len=5, start=None, stop=None, highlight_activity=True, save_plot=True):
+        """Plots activity counts from both accelerometers. Saves plot.
+
+           :argument
+           -start/stop: timestamp in format YYYY-mm-dd HH:MM:SS
+           -epoch_len: epoch length in seconds
+           -highlight_activity: boolean for whether to shade regions of non-sedentary activity
+           -save_plot: boolean whether to save plot
+        """
+
+        # Data cropping and making sure epoch length is correct -------------------------------------------------------
+        if epoch_len != self.cutpoint_dict["Epoch length"]:
+            self.recalculate_epoch_len(epoch_len=epoch_len, print_statement=True)
+
+        print("\nPlotting all {}-second epoch data...".format(self.cutpoint_dict["Epoch length"]))
+
+        if self.epoched_df is None:
+            self.epoched_df = pd.DataFrame(list(zip(self.df_lwrist["Timestamp"],
+                                                    self.df_lankle["SVM"],
+                                                    self.df_rankle["SVM"],
+                                                    self.df_lwrist["SVM"],
+                                                    self.df_rwrist["SVM"])),
+                                           columns=["Timestamp", "LAnkle", "RAnkle", "LWrist", "RWrist"])
+
+        if start is None and stop is None:
+            start = self.epoched_df.iloc[0]["Timestamp"]
+            stop = self.epoched_df.iloc[-1]["Timestamp"]
+
+        df = self.epoched_df.loc[(self.epoched_df["Timestamp"] > start) &
+                                 (self.epoched_df["Timestamp"] < stop)]
+
+        # Plotting ----------------------------------------------------------------------------------------------------
+
+        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, sharex='col', figsize=(self.fig_width, self.fig_height))
+        plt.subplots_adjust(hspace=.35)
+
+        plt.suptitle("All Data: {}-second epochs".format(epoch_len))
+
+        # SHADING NON-SEDENTARY REGIONS -------------------------------------------------------------------------------
+        if highlight_activity:
+            # Left wrist ----------
+            lw = [max(df["LWrist"]) if df["LWrist"].iloc[i] >= self.cutpoint_dict["NonDomLight"] else False
+                  for i in range(df.shape[0])]
+
+            ax1.fill_between(x=df["Timestamp"], y1=0, y2=lw, color='purple', alpha=.25)
+
+            # Right wrist --------
+            rw = [max(df["RWrist"]) if df["RWrist"].iloc[i] >= self.cutpoint_dict["DomLight"] else False
+                  for i in range(df.shape[0])]
+
+            ax2.fill_between(x=df["Timestamp"], y1=0, y2=rw, color='purple', alpha=.25)
+
+        # LEFT WRIST --------------------------------------------------------------------------------------------------
+        ax1.set_title("Left Wrist")
+        ax1.plot(df["Timestamp"], df["LWrist"], color='black')
+        ax1.axhline(y=self.cutpoint_dict["NonDomLight"], color='green', linestyle='dashed')
+        ax1.axhline(y=self.cutpoint_dict["NonDomModerate"], color='orange', linestyle='dashed')
+        ax1.axhline(y=self.cutpoint_dict["NonDomVigorous"], color='red', linestyle='dashed')
+        ax1.set_ylabel("Counts per {} sec".format(epoch_len))
+
+        # RIGHT WRIST -------------------------------------------------------------------------------------------------
+        ax2.set_title("Right Wrist")
+        ax2.plot(df["Timestamp"], df["RWrist"], color='black')
+        ax2.set_ylabel("Counts per {} sec".format(epoch_len))
+        ax2.axhline(y=self.cutpoint_dict["DomLight"], color='green', linestyle='dashed')
+        ax2.axhline(y=self.cutpoint_dict["DomModerate"], color='orange', linestyle='dashed')
+        ax2.axhline(y=self.cutpoint_dict["DomVigorous"], color='red', linestyle='dashed')
+
+        # LEFT ANKLE --------------------------------------------------------------------------------------------------
+        ax3.set_title("Left Ankle")
+        ax3.plot(df["Timestamp"], df["LAnkle"], color='black')
+        ax3.set_ylabel("Counts per {} sec".format(epoch_len))
+
+        # RIGHT WRIST -------------------------------------------------------------------------------------------------
+        ax4.set_title("Right Ankle")
+        ax4.plot(df["Timestamp"], df["RAnkle"], color='black')
+        ax4.set_ylabel("Counts per {} sec".format(epoch_len))
+
+        xfmt = mdates.DateFormatter("%Y/%m/%d \n%H:%M:%S %p")
+        ax4.xaxis.set_major_formatter(xfmt)
+        plt.xticks(rotation=45, fontsize=8)
+
+        if save_plot:
+            start_format = datetime.strftime(datetime.strptime(start, "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H_%M_%S")
+            stop_format = datetime.strftime(datetime.strptime(stop, "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H_%M_%S")
+
+            if highlight_activity:
+                f_name = self.check_file_overwrite("AllData_Epoch{}ActivityHighlighted_{}to{}".format(epoch_len,
+                                                                                                      start_format,
+                                                                                                      stop_format))
+            if not highlight_activity:
+                f_name = self.check_file_overwrite("AllData_Epoch{}_{}to{}".
+                                                   format(epoch_len, start_format, stop_format))
+
+            plt.savefig(f_name)
+            print("Plot saved as png ({})".format(f_name))
+
+    def plot_activity_volumes(self, epoch_len=5, plot_type="bar", use_percent=False):
+        """Plots activity volumes between non-dominant and dominant wrists.
+
+           :arguments
+           -epoch_len: epoch length in seconds
+           -plot_type: "bar" or "pie"
+           -use_percent: boolean whether to use percent (True) or total minutes (False)
+        """
+
+        if epoch_len != self.cutpoint_dict["Epoch length"]:
+            self.recalculate_epoch_len(epoch_len=epoch_len, print_statement=True)
+
+        if use_percent:
+            suffix = "%"
+            units = "%"
+        if not use_percent:
+            suffix = ""
+            units = ' mins'
+
+        if plot_type == "pie":
+            plt.subplots(1, 2, figsize=(self.fig_width, self.fig_height))
+            plt.suptitle("Activity Volume Comparison: {}-second epochs".format(epoch_len))
+
+            plt.subplot(1, 2, 1)
+            plt.title("Non-Dominant Wrist (Left)")
+            labels = ["Sed. ({}{})".format(self.activity_df["NonDominant{}".format(suffix)].loc["Sedentary"], units),
+                      "Light ({}{})".format(self.activity_df["NonDominant{}".format(suffix)].loc["Light"], units),
+                      "Mod. ({}{})".format(self.activity_df["NonDominant{}".format(suffix)].loc["Moderate"], units),
+                      "Vig. ({}{})".format(self.activity_df["NonDominant{}".format(suffix)].loc["Vigorous"], units)]
+            sizes = [i for i in self.activity_df["NonDominant{}".format(suffix)].iloc[0:4]]
+            colors = ['grey', 'green', 'orange', 'red']
+
+            patches, texts = plt.pie(sizes, colors=colors, shadow=False, startangle=90)
+            plt.legend(patches, labels, loc="lower left")
+
+            plt.subplot(1, 2, 2)
+            plt.title("Dominant Wrist (Right)")
+            labels = ["Sed. ({}{})".format(self.activity_df["Dominant{}".format(suffix)].loc["Sedentary"], units),
+                      "Light ({}{})".format(self.activity_df["Dominant{}".format(suffix)].loc["Light"], units),
+                      "Mod. ({}{})".format(self.activity_df["Dominant{}".format(suffix)].loc["Moderate"], units),
+                      "Vig. ({}{})".format(self.activity_df["Dominant{}".format(suffix)].loc["Vigorous"], units)]
+            sizes = [i for i in self.activity_df["NonDominant{}".format(suffix)].iloc[0:4]]
+            colors = ['grey', 'green', 'orange', 'red']
+
+            patches, texts = plt.pie(sizes, colors=colors, shadow=False, startangle=90)
+            plt.legend(patches, labels, loc="lower right")
+
+            plt.show()
+
+        if plot_type == "bar":
+
+            plt.subplots(2, 2, figsize=(self.fig_width, self.fig_height))
+            plt.suptitle("Activity Volume Comparison: {}-second epochs".format(epoch_len))
+
+            # Sedentary ----------------------------------------------------------------------------------------------
+            plt.subplot(2, 2, 1)
+            plt.title("Sedentary")
+
+            plt.bar(["NonDominant", "Dominant"],
+                    [self.activity_df.loc["Sedentary"]["NonDominant{}".format(suffix)],
+                     self.activity_df.loc["Sedentary"]["Dominant{}".format(suffix)]], edgecolor='black',
+                    color=["dimgrey", 'lightgray'])
+            plt.ylabel(units)
+
+            plt.subplot(2, 2, 2)
+            plt.title("Light")
+
+            plt.bar(["NonDominant", "Dominant"],
+                    [self.activity_df.loc["Light"]["NonDominant{}".format(suffix)],
+                     self.activity_df.loc["Light"]["Dominant{}".format(suffix)]], edgecolor='black',
+                    color=["darkgreen", 'lightgreen'])
+
+            plt.subplot(2, 2, 3)
+            plt.title("Moderate")
+
+            plt.bar(["NonDominant", "Dominant"],
+                    [self.activity_df.loc["Moderate"]["NonDominant{}".format(suffix)],
+                     self.activity_df.loc["Moderate"]["Dominant{}".format(suffix)]], edgecolor='black',
+                    color=["darkorange", 'moccasin'])
+            plt.ylabel(units)
+
+            plt.subplot(2, 2, 4)
+            plt.title("Vigorous")
+
+            plt.bar(["NonDominant", "Dominant"],
+                    [self.activity_df.loc["Vigorous"]["NonDominant{}".format(suffix)],
+                     self.activity_df.loc["Vigorous"]["Dominant{}".format(suffix)]], edgecolor='black',
+                    color=["darkred", 'lightcoral'])
 
 
 os.chdir("/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 7/")
@@ -396,4 +583,10 @@ x = Data(leftankle_filepath="AI_LAnkle_Epoch1s.csv",
          rightwrist_filepath="AI_RWrist_Epoch1s.csv")
 
 # Able to pick any epoch length (seconds). To save as csv: write_file=True
-x.recalculate_epoch_len(epoch_len=5, write_file=False)
+# x.recalculate_epoch_len(epoch_len=5, write_file=False)
+
+# x.plot_data(epoch_len=5, start="2020-10-05 13:05:01", stop="2020-10-05 14:00:00",
+#             highlight_activity=False, save_plot=True)
+
+# Plots activity volumes as pie or bar graph from last specified region of data
+# x.plot_activity_volumes(epoch_len=15, plot_type="pie", use_percent=True)
