@@ -1,5 +1,3 @@
-import ImportEDF
-
 from ecgdetectors import Detectors
 # https://github.com/luishowell/ecg-detectors
 
@@ -9,7 +7,6 @@ import pandas as pd
 import statistics
 import scipy.stats as stats
 from datetime import datetime
-from matplotlib.ticker import PercentFormatter
 import matplotlib.dates as mdates
 import pyedflib
 from datetime import timedelta
@@ -506,7 +503,8 @@ class Accel:
 
     def __init__(self, leftwrist_filepath=None, leftankle_filepath=None, epoch_len=15, fig_height=7, fig_width=12):
 
-        print("\n========================= ACCELEROEMETER DATA =========================")
+        print("\n===================================== ACCELEROMETER DATA ==========================================")
+
         # Default values for objects ----------------------------------------------------------------------------------
         self.lankle_fname = leftankle_filepath
         self.lwrist_fname = leftwrist_filepath
@@ -526,15 +524,16 @@ class Accel:
         self.df_lwrist, self.lwrist_samplerate = self.load_correct_file(filepath=self.lwrist_fname,
                                                                         f_type="Left Wrist")
 
-        self.calculate_epoch_len(epoch_len=self.epoch_len)
+        # Scaled cutpoints for 1-second epoch
+        self.cutpoint_dict = {"NonDomLight": round(47 * self.lwrist_samplerate / 30 / 15, 2),
+                              "NonDomModerate": round(64 * self.lwrist_samplerate / 30 / 15, 2),
+                              "NonDomVigorous": round(157 * self.lwrist_samplerate / 30 / 15, 2),
+                              "Epoch length": 1}
+
+        self.recalculate_epoch_len(epoch_len=self.epoch_len)
 
         # Powell et al., 2016 cutpoints scaled to 75 Hz sampling rate and 1-second epoch
         # Original is 30 Hz and 15-second epochs
-        if leftwrist_filepath is not None:
-            self.cutpoint_dict = {"NonDomLight": round(47 * self.lwrist_samplerate / 30 / 15, 2),
-                                  "NonDomModerate": round(64 * self.lwrist_samplerate / 30 / 15, 2),
-                                  "NonDomVigorous": round(157 * self.lwrist_samplerate / 30 / 15, 2),
-                                  "Epoch length": 1}
 
     def load_correct_file(self, filepath, f_type) -> object:
         """Method that specifies the correct file (.edf vs. .csv) to import for accelerometer files and
@@ -573,7 +572,9 @@ class Accel:
                             iloc[0].split(" ")[0])
 
         df = pd.read_csv(filepath_or_buffer=filepath, skiprows=99, sep=",")
-        df.columns = ["Timestamp", "X", "Y", "Z", "Lux", "Button", "Temp"]
+        df.columns = ["Timestamp", "Mean_X", "Mean_Y", "Mean_Z", "Mean_Lux", "Sum_Button",
+                      "Mean_Temp", "SVM", "SD_X", "SD_Y", "SD_Z", "Peak_Lux"]
+        df = df[["Timestamp", "SVM"]]
 
         df["Timestamp"] = [datetime.strptime(i, "%Y-%m-%d %H:%M:%S:%f") for i in df["Timestamp"]]
 
@@ -583,10 +584,15 @@ class Accel:
 
         return df, sample_rate
 
-    def calculate_epoch_len(self, epoch_len=15, print_statement=True):
+    def calculate_epoch_len(self, epoch_len=15):
 
-        if print_statement:
-            print("\nCalculating epoch length of {} seconds...".format(epoch_len))
+        print("\nCalculating epoch length of {} seconds...".format(epoch_len))
+
+        # Calculates cutpoints ========================================================================================
+        self.cutpoint_dict = {"NonDomLight": round(47 * self.lwrist_samplerate / 30 / 15 * self.epoch_len, 2),
+                              "NonDomModerate": round(64 * self.lwrist_samplerate / 30 / 15 * self.epoch_len, 2),
+                              "NonDomVigorous": round(157 * self.lwrist_samplerate / 30 / 15 * self.epoch_len, 2),
+                              "Epoch length": 1}
 
         # Empty lists as placeholders for missing data
         data_len = min([i for i in [self.df_lwrist.shape[0] if self.df_lwrist is not None else None,
@@ -596,7 +602,7 @@ class Accel:
 
         # LWRIST DATA =================================================================================================
         if self.df_lwrist is not None:
-            timestamps = self.df_lwrist["Timestamp"]
+            timestamps = self.df_lwrist["Timestamp"].iloc[::int(self.epoch_len * self.lwrist_samplerate)]
             stamps_found = True
             lwrist = self.df_lwrist
 
@@ -621,14 +627,13 @@ class Accel:
                 lwrist_svm.append(round(vm_sum, 5))
 
         if self.df_lwrist is None:
-            lwrist = [None for i in range(data_len)]
             lwrist_svm = [None for i in range(data_len)]
 
         # LANKLE DATA =================================================================================================
 
         if self.df_lankle is not None:
             if not stamps_found:
-                timestamps = self.df_lankle["Timestamp"]
+                timestamps = self.df_lankle["Timestamp"].iloc[::int(self.epoch_len * self.lankle_samplerate)]
                 stamps_found = True
 
             lankle = self.df_lankle
@@ -654,7 +659,6 @@ class Accel:
                 lankle_svm.append(round(vm_sum, 5))
 
         if self.df_lankle is None:
-            lankle = [None for i in range(data_len)]
             lankle_svm = [None for i in range(data_len)]
 
         self.df_epoch = pd.DataFrame(list(zip(timestamps, lwrist_svm, lankle_svm)),
@@ -662,15 +666,146 @@ class Accel:
 
         print("Epoching complete.")
 
+    def recalculate_epoch_len(self, epoch_len=15):
 
-"""e = ECG(filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Anton_ECG.edf",
-        downsample_ratio=2, epoch_len=15)"""
+        print("\nRecalculating epoch length to {} seconds...".format(epoch_len))
 
-a = Accel(leftwrist_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Anton_LWrist.csv",
-          leftankle_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Anton_LAnkle.csv")
+        # Whole data frames if no cropping
+        df_lankle = self.df_lankle
+        df_lwrist = self.df_lwrist
 
-"""fig, (ax1, ax2, ax3) = plt.subplots(3, sharex='col')
-ax1.plot(e.df_epoch["Timestamp"], e.df_epoch["Valid HR"], color='red')
-ax1.set_ylabel("HR")
-ax2.plot(a.epoched_df[""])
-ax3.plot(e.df_epoch["Timestamp"], e.df_epoch["Validity"], color='black')"""
+        # Empty lists as placeholders for missing data
+        lankle_epoched = [None for i in range(df_lankle.shape[0])]
+        lwrist_epoched = [None for i in range(df_lwrist.shape[0])]
+
+        timestamps_found = False
+
+        # Re-calculating SVMs ----------------------------------------------------------------------------------------
+        if self.df_lankle is not None:
+            timestamps = df_lankle["Timestamp"].iloc[::epoch_len]
+
+            timestamps_found = True
+            df_timestamps = timestamps
+
+            svm = [i for i in df_lankle["SVM"]]
+
+            lankle_epoched = [sum(svm[i:i + epoch_len]) for i in range(0, df_lankle.shape[0], epoch_len)]
+
+        if self.df_lwrist is not None:
+            timestamps = df_lwrist["Timestamp"].iloc[::epoch_len]
+
+            if not timestamps_found:
+                df_timestamps = timestamps
+
+            svm = [i for i in df_lwrist["SVM"]]
+
+            lwrist_epoched = [sum(svm[i:i + epoch_len]) for i in range(0, self.df_lwrist.shape[0], epoch_len)]
+
+        # Combines all devices' counts into one dataframe
+        self.df_epoch = pd.DataFrame(list(zip(df_timestamps, lankle_epoched, lwrist_epoched)),
+                                       columns=["Timestamp", "LAnkle", "LWrist"])
+
+        # Scales cutpoints
+        self.cutpoint_dict = {"NonDomLight": self.cutpoint_dict["NonDomLight"] *
+                                             (epoch_len / self.cutpoint_dict["Epoch length"]),
+                              "NonDomModerate": self.cutpoint_dict["NonDomModerate"] *
+                                                (epoch_len / self.cutpoint_dict["Epoch length"]),
+                              "NonDomVigorous": self.cutpoint_dict["NonDomVigorous"] *
+                                                (epoch_len / self.cutpoint_dict["Epoch length"]),
+                              "Epoch length": epoch_len}
+
+        print("Done.")
+
+
+class Subject:
+
+    def __init__(self, ecg_filepath=None, leftwrist_filepath=None, leftankle_filepath=None, epoch_len=15,
+                 ecg_downsample_ratio=2, age=33, rest_hr_window=60, n_epochs_rest=5, fig_height=7, fig_width=12):
+
+        self.ecg_filepath = ecg_filepath
+        self.lwrist_filepath = leftwrist_filepath
+        self.lankle_filepath = leftankle_filepath
+
+        self.epoch_len = epoch_len
+        self.downsample_ratio = ecg_downsample_ratio
+        self.age = age
+        self.rest_hr_window = rest_hr_window
+        self.n_epochs_rest = n_epochs_rest
+
+        self.fig_height = fig_height
+        self.fig_width = fig_width
+
+        # ECG data object
+        self.ecg = ECG(filepath=self.ecg_filepath, downsample_ratio=self.downsample_ratio, epoch_len=self.epoch_len)
+
+        # Accelerometer data object
+        self.accel = Accel(leftwrist_filepath=self.lwrist_filepath,
+                           leftankle_filepath=self.lankle_filepath)
+
+    def plot_hr_wrist(self):
+
+        fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
+
+        plt.suptitle("HR and Wrist Activity Count Data")
+
+        # HR DATA ====================================================================================================
+
+        ax1.set_title("Heart Rate")
+        ax1.plot(self.ecg.df_epoch["Timestamp"], self.ecg.df_epoch["Valid HR"], color='red')
+        ax1.set_ylabel("HR")
+
+        ax1.fill_between(x=self.ecg.df_epoch["Timestamp"], y1=0, y2=self.ecg.hr_zones["Light"],
+                         color='grey', alpha=.3, label="Sedentary")
+
+        ax1.fill_between(x=self.ecg.df_epoch["Timestamp"],
+                         y1=self.ecg.hr_zones["Light"], y2=self.ecg.hr_zones["Moderate"],
+                         color='green', alpha=.3, label="Light")
+
+        ax1.fill_between(x=self.ecg.df_epoch["Timestamp"],
+                         y1=self.ecg.hr_zones["Moderate"], y2=self.ecg.hr_zones["Vigorous"],
+                         color='orange', alpha=.3, label="Moderate")
+
+        ax1.fill_between(x=self.ecg.df_epoch["Timestamp"], y1=self.ecg.hr_zones["Vigorous"], y2=self.ecg.hr_max,
+                         color='red', alpha=.3, label="Vigorous")
+
+        ax1.set_ylabel("HR (bpm)")
+        ax1.legend()
+        ax1.set_ylim(40, self.ecg.hr_max)
+
+        # LEFT WRIST DATA ============================================================================================
+        ax2.set_title("Left Wrist")
+        ax2.plot(self.accel.df_epoch["Timestamp"], self.accel.df_epoch["LWrist"], color='dodgerblue')
+        ax2.set_ylabel("Counts / {} seconds".format(self.epoch_len))
+
+        ax2.fill_between(x=self.accel.df_epoch["Timestamp"],
+                         y1=0,
+                         y2=self.accel.cutpoint_dict["NonDomLight"],
+                         color='grey', alpha=.3, label="Sedentary")
+
+        ax2.fill_between(x=self.accel.df_epoch["Timestamp"],
+                         y1=self.accel.cutpoint_dict["NonDomLight"],
+                         y2=self.accel.cutpoint_dict["NonDomModerate"],
+                         color='green', alpha=.3, label="Light")
+
+        ax2.fill_between(x=self.accel.df_epoch["Timestamp"],
+                         y1=self.accel.cutpoint_dict["NonDomModerate"],
+                         y2=self.accel.cutpoint_dict["NonDomVigorous"],
+                         color='orange', alpha=.3, label="Moderate")
+
+        ax2.fill_between(x=self.accel.df_epoch["Timestamp"],
+                         y1=self.accel.cutpoint_dict["NonDomVigorous"],
+                         y2=max(self.accel.df_epoch["LWrist"]),
+                         color='red', alpha=.3, label="Vigorous")
+        ax2.legend()
+
+        xfmt = mdates.DateFormatter("%Y/%m/%d\n%H:%M:%S")
+        ax2.xaxis.set_major_formatter(xfmt)
+        plt.xticks(rotation=45, fontsize=8)
+
+
+s = Subject(ecg_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Anton_ECG.edf",
+            ecg_downsample_ratio=2, epoch_len=15,
+            leftwrist_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Epoch_1s_LWrist.csv",
+            leftankle_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Epoch_1s_LAnkle.csv")
+
+
