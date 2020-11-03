@@ -32,27 +32,19 @@ class ECG:
         self.fig_width = fig_width
         self.fig_height = fig_height
 
+        self.df_raw = None
         self.df_epoch = None
 
         self.sample_rate = 250
         self.rest_hr = 55
 
         # Raw data
-        self.timestamps, self.raw, self.epoch_timestamps = self.import_file()
-
-        # Finds time periods of unusable data
-        self.check_quality()
-
-        # Calculates resting and max HR
-        self.find_resting_hr(window_size=self.rest_hr_window, n_windows=self.n_epochs_rest)
+        self.timestamps, self.raw = self.import_file()
 
         self.hr_max = 208 - .7 * self.age  # Tanaka et al., 2001 equation
 
         # Dictionary for HR that correspond to %HRR zones
         self.hr_zones = {"Sedentary": 0}
-
-        # Calculates HR as %HRR
-        self.calculate_percent_hrr()
 
     def import_file(self):
         """Method that loads voltage channel, sample rate, starttime, and file duration.
@@ -87,7 +79,7 @@ class ECG:
         # Timestamps
         end_time = starttime + timedelta(seconds=len(raw) / self.sample_rate)
         timestamps = np.asarray(pd.date_range(start=starttime, end=end_time, periods=len(raw)))
-        epoch_timestamps = timestamps[::self.epoch_len * self.sample_rate]
+        # epoch_timestamps = timestamps[::self.epoch_len * self.sample_rate]
 
         t1_stamp = datetime.now()
         stamp_time = (t1_stamp - t0_stamp).seconds
@@ -97,7 +89,8 @@ class ECG:
         proc_time = (t1 - t0).seconds
         print("\n" + "Import complete ({} seconds).".format(round(proc_time, 2)))
 
-        return timestamps, raw, epoch_timestamps
+        # return timestamps, raw, epoch_timestamps
+        return timestamps, raw
 
     def check_quality(self):
         """Performs quality check using Orphanidou et al. (2015) algorithm that has been tweaked to factor in voltage
@@ -106,7 +99,7 @@ class ECG:
            This function runs a loop that creates object from the class CheckQuality for each epoch in the raw data.
         """
 
-        print("\n" + "Running quality check with Orphanidou et al. (2015) algorithm...")
+        print("\n" + "Running ECG signal quality check with Orphanidou et al. (2015) algorithm...")
 
         t0 = datetime.now()
 
@@ -116,9 +109,11 @@ class ECG:
         rr_sd = []  # window's RR SD
         r_peaks = []  # all R peak indexes
 
-        for start_index in range(0, int(len(self.raw)), self.epoch_len * self.sample_rate):
+        raw = [i for i in self.df_raw["Raw"]]
 
-            qc = CheckQuality(ecg_object=self, start_index=start_index, epoch_len=self.epoch_len, template_data="raw")
+        for start_index in range(0, len(raw), self.epoch_len * self.sample_rate):
+
+            qc = CheckQuality(ecg_object=self, start_index=start_index, epoch_len=self.epoch_len)
 
             avg_voltage.append(qc.volt_range)
 
@@ -143,17 +138,15 @@ class ECG:
         proc_time = (t1 - t0).seconds
         print("\n" + "Quality check complete ({} seconds).".format(round(proc_time, 2)))
         print("-Processing time of {} seconds per "
-              "hour of data.".format(round(proc_time / (len(self.raw)/self.sample_rate/3600)), 2))
+              "hour of data.".format(round(proc_time / (self.df_raw.shape[0]/self.sample_rate/3600)), 2))
 
         # List of epoched heart rates but any invalid epoch is marked as None instead of 0 (as is self.epoch_hr)
         valid_hr = [epoch_hr[i] if validity_list[i] == "Valid"
                     else None for i in range(len(epoch_hr))]
 
-        self.df_epoch = pd.DataFrame(list(zip(self.epoch_timestamps, validity_list,
-                                              epoch_hr, valid_hr)),
+        self.df_epoch = pd.DataFrame(list(zip(self.df_raw["Timestamp"].iloc[::self.sample_rate * self.epoch_len],
+                                              validity_list, epoch_hr, valid_hr)),
                                      columns=["Timestamp", "Validity", "HR", "Valid HR"])
-
-        self.epoch_timestamps = None
 
     def find_resting_hr(self, window_size, n_windows):
         """Function that calculates resting HR based on inputs.
@@ -191,7 +184,7 @@ class ECG:
 
         hrr = (208 - 0.7 * self.age) - self.rest_hr
 
-        self.df_epoch["HRR"] = [(100 * i - self.rest_hr) / self.hr_max if i is not None else None
+        self.df_epoch["HRR"] = [(i - self.rest_hr) / hrr * 100 if i is not None else None
                                 for i in self.df_epoch["Valid HR"]]
 
         self.hr_zones["Light"] = round(30 * hrr / 100 + self.rest_hr, 1)
@@ -223,10 +216,6 @@ class ECG:
         ax1.xaxis.set_major_formatter(xfmt)
         plt.xticks(rotation=45, fontsize=8)
 
-    def calculate_activity_volume(self, start=None, stop=None):
-
-        pass
-
 
 class CheckQuality:
     """Class method that implements the Orphanidou ECG signal quality assessment algorithm on raw ECG data.
@@ -236,7 +225,7 @@ class CheckQuality:
        19(3). 832-838.
     """
 
-    def __init__(self, ecg_object, start_index, template_data='filtered', voltage_thresh=250, epoch_len=15):
+    def __init__(self, ecg_object, start_index, voltage_thresh=250, epoch_len=15):
         """Initialization method.
 
         :param
@@ -251,13 +240,11 @@ class CheckQuality:
         self.epoch_len = epoch_len
         self.fs = ecg_object.sample_rate
         self.start_index = start_index
-        self.template_data = template_data
 
         self.ecg_object = ecg_object
 
-        self.raw_data = ecg_object.raw[self.start_index:self.start_index+self.epoch_len*self.fs]
-        self.wavelet = None
-        self.filt_squared = None
+        self.raw_data = [i for i in ecg_object.df_raw["Raw"].iloc[self.start_index:
+                                                                  self.start_index + self.epoch_len * self.fs]]
 
         self.index_list = np.arange(0, len(self.raw_data), self.epoch_len*self.fs)
 
@@ -305,7 +292,7 @@ class CheckQuality:
 
         # Runs rules check if enough peaks found
         if self.enough_beats:
-            self.adaptive_filter(template_data=self.template_data)
+            self.adaptive_filter()
             self.calculate_correlation()
             self.apply_rules()
 
@@ -330,7 +317,7 @@ class CheckQuality:
 
         # Runs peak detection on raw data ----------------------------------------------------------------------------
         # Uses ecgdetectors package -> stationary wavelet transformation + Pan-Tompkins peak detection algorithm
-        self.r_peaks, self.wavelet, self.filt_squared = detectors.swt_detector(unfiltered_ecg=self.raw_data)
+        self.r_peaks = detectors.swt_detector(unfiltered_ecg=self.raw_data)
 
         # Checks to see if there are enough potential peaks to correspond to correct HR range ------------------------
         # Requires number of beats in window that corresponds to ~40 bpm to continue
@@ -381,7 +368,7 @@ class CheckQuality:
         # Calculates range of ECG voltage ----------------------------------------------------------------------------
         self.volt_range = max(self.raw_data) - min(self.raw_data)
 
-    def adaptive_filter(self, template_data="raw"):
+    def adaptive_filter(self):
         """Method that runs an adaptive filter that generates the "average" QRS template for the window of data.
 
         - Calculates the median RR interval
@@ -395,10 +382,7 @@ class CheckQuality:
 
         # Approach 2: takes a window around each detected R-peak of width peak +/- median_rr/2 ------------------------
         for peak in self.r_peaks:
-            if template_data == "raw":
-                window = self.raw_data[peak - int(self.median_rr / 2):peak + int(self.median_rr / 2)]
-            if template_data == "wavelet":
-                window = self.wavelet[peak - int(self.median_rr / 2):peak + int(self.median_rr / 2)]
+            window = self.raw_data[peak - int(self.median_rr / 2):peak + int(self.median_rr / 2)]
 
             self.ecg_windowed.append(window)  # Adds window to list of windows
 
@@ -532,9 +516,6 @@ class Accel:
 
         self.recalculate_epoch_len(epoch_len=self.epoch_len)
 
-        # Powell et al., 2016 cutpoints scaled to 75 Hz sampling rate and 1-second epoch
-        # Original is 30 Hz and 15-second epochs
-
     def load_correct_file(self, filepath, f_type) -> object:
         """Method that specifies the correct file (.edf vs. .csv) to import for accelerometer files and
            retrieves sample rates.
@@ -583,88 +564,6 @@ class Accel:
         print("Import complete ({} seconds).".format(round(proc_time, 2)))
 
         return df, sample_rate
-
-    def calculate_epoch_len(self, epoch_len=15):
-
-        print("\nCalculating epoch length of {} seconds...".format(epoch_len))
-
-        # Calculates cutpoints ========================================================================================
-        self.cutpoint_dict = {"NonDomLight": round(47 * self.lwrist_samplerate / 30 / 15 * self.epoch_len, 2),
-                              "NonDomModerate": round(64 * self.lwrist_samplerate / 30 / 15 * self.epoch_len, 2),
-                              "NonDomVigorous": round(157 * self.lwrist_samplerate / 30 / 15 * self.epoch_len, 2),
-                              "Epoch length": 1}
-
-        # Empty lists as placeholders for missing data
-        data_len = min([i for i in [self.df_lwrist.shape[0] if self.df_lwrist is not None else None,
-                       self.df_lankle.shape[0] if self.df_lankle is not None else None] if i is not None])
-
-        stamps_found = False
-
-        # LWRIST DATA =================================================================================================
-        if self.df_lwrist is not None:
-            timestamps = self.df_lwrist["Timestamp"].iloc[::int(self.epoch_len * self.lwrist_samplerate)]
-            stamps_found = True
-            lwrist = self.df_lwrist
-
-            vm = []
-
-            for row in lwrist.itertuples():
-                vm.append(abs(math.sqrt(math.pow(row.X, 2) +
-                                        math.pow(row.Y, 2) +
-                                        math.pow(row.Z, 2)) - 1))
-
-            lwrist_svm = []
-            for i in range(0, len(vm), int(self.lwrist_samplerate * self.epoch_len)):
-
-                if i + self.epoch_len * self.lwrist_samplerate > len(vm):
-                    break
-
-                vm_sum = sum(vm[i:i + int(self.epoch_len * self.lwrist_samplerate)])
-
-                if vm_sum == self.epoch_len * self.lwrist_samplerate:
-                    vm_sum = 0
-
-                lwrist_svm.append(round(vm_sum, 5))
-
-        if self.df_lwrist is None:
-            lwrist_svm = [None for i in range(data_len)]
-
-        # LANKLE DATA =================================================================================================
-
-        if self.df_lankle is not None:
-            if not stamps_found:
-                timestamps = self.df_lankle["Timestamp"].iloc[::int(self.epoch_len * self.lankle_samplerate)]
-                stamps_found = True
-
-            lankle = self.df_lankle
-
-            vm = []
-
-            for row in lankle.itertuples():
-                vm.append(abs(math.sqrt(math.pow(row.X, 2) +
-                                        math.pow(row.Y, 2) +
-                                        math.pow(row.Z, 2)) - 1))
-
-            lankle_svm = []
-            for i in range(0, len(vm), int(self.lankle_samplerate * self.epoch_len)):
-
-                if i + self.epoch_len * self.lankle_samplerate > len(vm):
-                    break
-
-                vm_sum = sum(vm[i:int(i + self.epoch_len * self.lankle_samplerate)])
-
-                if vm_sum == self.epoch_len * self.lankle_samplerate:
-                    vm_sum = 0
-
-                lankle_svm.append(round(vm_sum, 5))
-
-        if self.df_lankle is None:
-            lankle_svm = [None for i in range(data_len)]
-
-        self.df_epoch = pd.DataFrame(list(zip(timestamps, lwrist_svm, lankle_svm)),
-                                     columns=["Timestamp", "LWrist", "LAnkle"])
-
-        print("Epoching complete.")
 
     def recalculate_epoch_len(self, epoch_len=15):
 
@@ -742,7 +641,69 @@ class Subject:
         self.accel = Accel(leftwrist_filepath=self.lwrist_filepath,
                            leftankle_filepath=self.lankle_filepath)
 
+        # Syncs data
+        self.sync_epochs()
+
+        # More ECG processing
+        # Finds time periods of unusable data
+        self.ecg.check_quality()
+
+        # Calculates resting and max HR
+        self.ecg.find_resting_hr(window_size=self.ecg.rest_hr_window, n_windows=self.ecg.n_epochs_rest)
+
+        self.ecg.calculate_percent_hrr()
+
+        # Combines cropped accel and ECG data into one df
+        self.df_epoch = self.crop_df_epoch()
+
+        self.activity_volume = None
+        self.activity_df = None
+
+    def sync_epochs(self):
+        """Crops raw data from ECG and 1s epoched accelerometer data so files start at same time."""
+
+        print("\nSyncing raw data so epochs align...")
+
+        start = max(self.accel.df_epoch["Timestamp"].iloc[0], self.ecg.timestamps[0])
+        stop = min(self.accel.df_epoch["Timestamp"].iloc[-1], self.ecg.timestamps[-1])
+
+        hr = pd.DataFrame(list(zip(self.ecg.timestamps, self.ecg.raw)), columns=["Timestamp", "Raw"])
+        hr = hr.loc[(hr["Timestamp"] >= start) & (hr["Timestamp"] <= stop)]
+
+        self.ecg.df_raw = hr
+        del self.ecg.timestamps, self.ecg.raw
+
+        self.accel.df_epoch = self.accel.df_epoch.loc[(self.accel.df_epoch["Timestamp"] >= start) &
+                                                      (self.accel.df_epoch["Timestamp"] <= stop)]
+
+        print("Complete.")
+
+    def crop_df_epoch(self):
+        """Crops and combines epoched data together."""
+
+        print("\nCropping dataframes so wrist and HR data is from same time period...")
+
+        start = max(self.accel.df_epoch["Timestamp"].iloc[0], self.ecg.df_epoch["Timestamp"].iloc[0])
+        stop = min(self.accel.df_epoch["Timestamp"].iloc[-1], self.ecg.df_epoch["Timestamp"].iloc[-1])
+
+        df_accel = self.accel.df_epoch.loc[(self.accel.df_epoch["Timestamp"] >= start) &
+                                           (self.accel.df_epoch["Timestamp"] <= stop)]
+
+        df_ecg = self.ecg.df_epoch.loc[(self.ecg.df_epoch["Timestamp"] >= start) &
+                                       (self.ecg.df_epoch['Timestamp'] <= stop)]
+
+        df = pd.DataFrame(list(zip(df_accel["Timestamp"], df_accel["LAnkle"], df_accel["LWrist"],
+                                   df_ecg["Validity"], df_ecg["HR"], df_ecg["Valid HR"], df_ecg["HRR"])),
+                          columns=["Timestamp", "LAnkle", "LWrist", "HR Validity", "HR", "Valid HR", "HRR"])
+
+        print("Complete.")
+
+        return df
+
     def plot_hr_wrist(self):
+        """Plots LWrist and HR data. Marks intensity regions
+           (HR = %HRR ranges; LWrist = Powell et al. 2017 cutpoints.
+        """
 
         fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
 
@@ -751,21 +712,21 @@ class Subject:
         # HR DATA ====================================================================================================
 
         ax1.set_title("Heart Rate")
-        ax1.plot(self.ecg.df_epoch["Timestamp"], self.ecg.df_epoch["Valid HR"], color='red')
+        ax1.plot(self.df_epoch["Timestamp"], self.df_epoch["Valid HR"], color='black')
         ax1.set_ylabel("HR")
 
-        ax1.fill_between(x=self.ecg.df_epoch["Timestamp"], y1=0, y2=self.ecg.hr_zones["Light"],
+        ax1.fill_between(x=self.df_epoch["Timestamp"], y1=0, y2=self.ecg.hr_zones["Light"],
                          color='grey', alpha=.3, label="Sedentary")
 
-        ax1.fill_between(x=self.ecg.df_epoch["Timestamp"],
+        ax1.fill_between(x=self.df_epoch["Timestamp"],
                          y1=self.ecg.hr_zones["Light"], y2=self.ecg.hr_zones["Moderate"],
                          color='green', alpha=.3, label="Light")
 
-        ax1.fill_between(x=self.ecg.df_epoch["Timestamp"],
+        ax1.fill_between(x=self.df_epoch["Timestamp"],
                          y1=self.ecg.hr_zones["Moderate"], y2=self.ecg.hr_zones["Vigorous"],
                          color='orange', alpha=.3, label="Moderate")
 
-        ax1.fill_between(x=self.ecg.df_epoch["Timestamp"], y1=self.ecg.hr_zones["Vigorous"], y2=self.ecg.hr_max,
+        ax1.fill_between(x=self.df_epoch["Timestamp"], y1=self.ecg.hr_zones["Vigorous"], y2=self.ecg.hr_max,
                          color='red', alpha=.3, label="Vigorous")
 
         ax1.set_ylabel("HR (bpm)")
@@ -774,27 +735,27 @@ class Subject:
 
         # LEFT WRIST DATA ============================================================================================
         ax2.set_title("Left Wrist")
-        ax2.plot(self.accel.df_epoch["Timestamp"], self.accel.df_epoch["LWrist"], color='dodgerblue')
+        ax2.plot(self.df_epoch["Timestamp"], self.df_epoch["LWrist"], color='dodgerblue')
         ax2.set_ylabel("Counts / {} seconds".format(self.epoch_len))
 
-        ax2.fill_between(x=self.accel.df_epoch["Timestamp"],
+        ax2.fill_between(x=self.df_epoch["Timestamp"],
                          y1=0,
                          y2=self.accel.cutpoint_dict["NonDomLight"],
                          color='grey', alpha=.3, label="Sedentary")
 
-        ax2.fill_between(x=self.accel.df_epoch["Timestamp"],
+        ax2.fill_between(x=self.df_epoch["Timestamp"],
                          y1=self.accel.cutpoint_dict["NonDomLight"],
                          y2=self.accel.cutpoint_dict["NonDomModerate"],
                          color='green', alpha=.3, label="Light")
 
-        ax2.fill_between(x=self.accel.df_epoch["Timestamp"],
+        ax2.fill_between(x=self.df_epoch["Timestamp"],
                          y1=self.accel.cutpoint_dict["NonDomModerate"],
                          y2=self.accel.cutpoint_dict["NonDomVigorous"],
                          color='orange', alpha=.3, label="Moderate")
 
-        ax2.fill_between(x=self.accel.df_epoch["Timestamp"],
+        ax2.fill_between(x=self.df_epoch["Timestamp"],
                          y1=self.accel.cutpoint_dict["NonDomVigorous"],
-                         y2=max(self.accel.df_epoch["LWrist"]),
+                         y2=max(self.df_epoch["LWrist"]) * 1.1,
                          color='red', alpha=.3, label="Vigorous")
         ax2.legend()
 
@@ -802,10 +763,94 @@ class Subject:
         ax2.xaxis.set_major_formatter(xfmt)
         plt.xticks(rotation=45, fontsize=8)
 
+    def calculate_activity_volume(self, start=None, stop=None, remove_invalid_ecg=True):
+        """Calculates activity volumes (minutes and percent of data) for LWrist and HR data. Able to crop.
+
+           :arguments
+           -start/stop: timestamps used to crop
+           -remove_invalid_ecg: boolean whether to include invalid ECG signal periods.
+                                If True, the total volume of data will be the same between LWrist and HR data.
+                                If False, LWrist contains more data.
+        """
+
+        # Dataframe cropping =========================================================================================
+        if start is not None and stop is None:
+            stop = self.df_epoch.iloc[-1]["Timestamp"]
+
+        if start is not None and stop is not None:
+            df = self.df_epoch.loc[(self.df_epoch["Timestamp"] >= start) &
+                                   (self.df_epoch["Timestamp"] <= stop)]
+
+        if start is None and stop is None:
+            df = self.df_epoch
+
+        if remove_invalid_ecg:
+            df = df.loc[df["HR Validity"] == "Valid"]
+
+        print("\nCalculating activity data from {} to {} "
+              "in {}-second epochs...".format(df.iloc[0]["Timestamp"], df.iloc[-1]['Timestamp'], self.epoch_len))
+
+        # Non-dominant (left) wrist -----------------------------------------------------------------------------------
+        nd_sed_epochs = df["LWrist"].loc[(df["LWrist"] < self.accel.cutpoint_dict["NonDomLight"])].shape[0]
+
+        nd_light_epochs = df["LWrist"].loc[(df["LWrist"] >= self.accel.cutpoint_dict["NonDomLight"]) &
+                                           (df["LWrist"] < self.accel.cutpoint_dict["NonDomModerate"])].shape[0]
+
+        nd_mod_epochs = df["LWrist"].loc[(df["LWrist"] >= self.accel.cutpoint_dict["NonDomModerate"]) &
+                                         (df["LWrist"] < self.accel.cutpoint_dict["NonDomVigorous"])].shape[0]
+
+        nd_vig_epochs = df["LWrist"].loc[(df["LWrist"] >= self.accel.cutpoint_dict["NonDomVigorous"])].shape[0]
+
+        # Heart rate -------------------------------------------------------------------------------------------------
+        hr_sed_epochs = df.loc[df["HRR"] < 30].shape[0]
+        hr_light_epochs = df.loc[(df["HRR"] >= 30) & (df["HRR"] < 40)].shape[0]
+        hr_mod_epochs = df.loc[(df["HRR"] >= 40) & (df["HRR"] < 60)].shape[0]
+        hr_vig_epochs = df.loc[df["HRR"] >= 60].shape[0]
+
+        # Data storage ------------------------------------------------------------------------------------------------
+        activity_minutes = {"LWristSed": round(nd_sed_epochs / (60 / self.epoch_len), 2),
+                            "LWristLight": round(nd_light_epochs / (60 / self.epoch_len), 2),
+                            "LWristMod": round(nd_mod_epochs / (60 / self.epoch_len), 2),
+                            "LWristVig": round(nd_vig_epochs / (60 / self.epoch_len), 2),
+                            "HRSed": round(hr_sed_epochs / (60 / self.epoch_len), 2),
+                            "HRLight": round(hr_light_epochs / (60 / self.epoch_len), 2),
+                            "HRMod": round(hr_mod_epochs / (60 / self.epoch_len), 2),
+                            "HRVig": round(hr_vig_epochs / (60 / self.epoch_len), 2),
+                            }
+
+        activity_minutes["LWristMVPA"] = activity_minutes["LWristMod"] + activity_minutes["LWristVig"]
+        activity_minutes["HRMVPA"] = activity_minutes["HRMod"] + activity_minutes["HRVig"]
+
+        self.activity_volume = activity_minutes
+        lwrist = [activity_minutes["LWristSed"], activity_minutes["LWristLight"],
+                  activity_minutes["LWristMod"], activity_minutes["LWristVig"], activity_minutes["LWristMVPA"]]
+
+        hr = [activity_minutes["HRSed"], activity_minutes["HRLight"],
+              activity_minutes["HRMod"], activity_minutes["HRVig"], activity_minutes["HRMVPA"]]
+
+        self.activity_df = pd.DataFrame(list(zip(lwrist, hr)), columns=["LWrist", "HR"])
+        self.activity_df.index = ["Sedentary", "Light", "Moderate", "Vigorous", "MVPA"]
+
+        self.activity_df["LWrist%"] = 100 * self.activity_df["LWrist"] / \
+                                      sum(self.activity_df["LWrist"].loc[["Sedentary", "Light",
+                                                                          "Moderate", "Vigorous"]])
+
+        self.activity_df["LWrist%"] = self.activity_df["LWrist%"].round(2)
+
+        self.activity_df["HR%"] = 100 * self.activity_df["HR"] / \
+                                      sum(self.activity_df["HR"].loc[["Sedentary", "Light",
+                                                                      "Moderate", "Vigorous"]])
+
+        self.activity_df["HR%"] = self.activity_df["HR%"].round(2)
+
+        print("\nActivity volume (removed invalid ECG epochs = {})".format(remove_invalid_ecg))
+        print(self.activity_df)
+
 
 s = Subject(ecg_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Anton_ECG.edf",
             ecg_downsample_ratio=2, epoch_len=15,
             leftwrist_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Epoch_1s_LWrist.csv",
             leftankle_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Epoch_1s_LAnkle.csv")
 
-
+s.calculate_activity_volume(remove_invalid_ecg=True, start=None, stop=None)
+# s.plot_hr_wrist()
