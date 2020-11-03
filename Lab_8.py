@@ -658,6 +658,7 @@ class Subject:
 
         self.activity_volume = None
         self.activity_df = None
+        self.hr_epoch = None
 
     def sync_epochs(self):
         """Crops raw data from ECG and 1s epoched accelerometer data so files start at same time."""
@@ -846,6 +847,90 @@ class Subject:
         print("\nActivity volume (removed invalid ECG epochs = {})".format(remove_invalid_ecg))
         print(self.activity_df)
 
+    def plot_ecg_validity_data(self):
+
+        m = s.df_epoch[["LAnkle", "LWrist", "HR Validity"]].groupby("HR Validity").mean()
+        sd = s.df_epoch[["LAnkle", "LWrist", "HR Validity"]].groupby("HR Validity").std()
+
+        plt.subplots(1, 2, figsize=(self.fig_width, self.fig_height))
+        plt.suptitle("ECG Validity by Ankle/Wrist Activity Counts")
+
+        plt.subplot(1, 2, 1)
+        plt.title("LAnkle (mean ± SD)")
+        plt.bar(["Invalid ECG", "Valid ECG"], m["LAnkle"], edgecolor='black', color=['red', 'green'], alpha=.5,
+                yerr=sd["LAnkle"], capsize=4)
+
+        plt.ylabel("Activity Counts")
+
+        plt.subplot(1, 2, 2)
+        plt.title("LWrist (mean ± SD)")
+        plt.bar(["Invalid ECG", "Valid ECG"], m["LWrist"], edgecolor='black', color=['red', 'green'], alpha=.5,
+                yerr=sd["LWrist"], capsize=4)
+
+    def recalculate_hr_epochs(self, epoch_len=15, show_plot=True):
+
+        print("\n" + "Recalculating HR into {}-second epochs...".format(epoch_len))
+
+        validity_list = []  # window's validity (binary; 1 = invalid)
+        epoch_hr = []  # window's HRs
+        avg_voltage = []  # window's voltage range
+        rr_sd = []  # window's RR SD
+        r_peaks = []  # all R peak indexes
+
+        raw = [i for i in self.ecg.df_raw["Raw"]]
+
+        for start_index in range(0, len(raw) - epoch_len * self.ecg.sample_rate, epoch_len * self.ecg.sample_rate):
+
+            qc = CheckQuality(ecg_object=self.ecg, start_index=start_index, epoch_len=epoch_len)
+
+            avg_voltage.append(qc.volt_range)
+
+            if qc.valid_period:
+                validity_list.append("Valid")
+                epoch_hr.append(round(qc.hr, 2))
+                rr_sd.append(qc.rr_sd)
+
+                for peak in qc.r_peaks_index_all:
+                    r_peaks.append(peak)
+                for peak in qc.removed_peak:
+                    r_peaks.append(peak + start_index)
+
+                r_peaks = sorted(r_peaks)
+
+            if not qc.valid_period:
+                validity_list.append("Invalid")
+                epoch_hr.append(0)
+                rr_sd.append(0)
+
+        print("Data has been re-epoched.")
+
+        # List of epoched heart rates but any invalid epoch is marked as None instead of 0 (as is self.epoch_hr)
+        valid_hr = [epoch_hr[i] if validity_list[i] == "Valid"
+                    else None for i in range(len(epoch_hr))]
+
+        df_epoch = pd.DataFrame(list(zip(self.ecg.df_raw["Timestamp"].iloc[::self.ecg.sample_rate * epoch_len],
+                                         validity_list, epoch_hr, valid_hr)),
+                                columns=["Timestamp", "Validity", "HR", "Valid HR"])
+
+        self.hr_epoch = df_epoch
+
+        if show_plot:
+
+            fig, (ax1) = plt.subplots(1, sharex='col', figsize=(self.fig_width, self.fig_height))
+            plt.title("Comparison of HR with different epoch lengths")
+            ax1.plot(s.df_epoch["Timestamp"], s.df_epoch["Valid HR"],
+                     color='red', label="Epoch{}".format(self.epoch_len))
+
+            ax1.plot(s.hr_epoch["Timestamp"], s.hr_epoch["Valid HR"],
+                     color='black', label="Epoch{}".format(epoch_len))
+
+            ax1.set_ylabel("HR (bpm)")
+            ax1.legend()
+
+            xfmt = mdates.DateFormatter("%Y/%m/%d\n%H:%M:%S")
+            ax1.xaxis.set_major_formatter(xfmt)
+            plt.xticks(rotation=45, fontsize=8)
+
 
 s = Subject(ecg_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Anton_ECG.edf",
             ecg_downsample_ratio=2, epoch_len=15,
@@ -854,3 +939,4 @@ s = Subject(ecg_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCours
 
 s.calculate_activity_volume(remove_invalid_ecg=True, start=None, stop=None)
 # s.plot_hr_wrist()
+s.recalculate_hr_epochs(epoch_len=45, show_plot=True)
