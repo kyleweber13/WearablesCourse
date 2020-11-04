@@ -12,6 +12,7 @@ import pyedflib
 from datetime import timedelta
 import os
 import math
+import sys
 
 
 class ECG:
@@ -33,13 +34,15 @@ class ECG:
         self.fig_height = fig_height
 
         self.df_raw = None
+        self.df_accel = None
         self.df_epoch = None
 
         self.sample_rate = 250
+        self.accel_sample_rate = 25
         self.rest_hr = 55
 
         # Raw data
-        self.timestamps, self.raw = self.import_file()
+        self.timestamps, self.raw, self.accel_vm = self.import_file()
 
         self.hr_max = 208 - .7 * self.age  # Tanaka et al., 2001 equation
 
@@ -66,12 +69,12 @@ class ECG:
 
         starttime = file.getStartdatetime()
 
-        # DOWNSAMPLING ================================================================================================
+        # DOWNSAMPLING
         if self.downsample_ratio != 1:
             raw = raw[::self.downsample_ratio]
             self.sample_rate = int(self.sample_rate / self.downsample_ratio)
 
-        # TIMESTAMP GENERATION ========================================================================================
+        # TIMESTAMP GENERATION
         t0_stamp = datetime.now()
 
         print("\n" + "Creating timestamps...")
@@ -79,7 +82,6 @@ class ECG:
         # Timestamps
         end_time = starttime + timedelta(seconds=len(raw) / self.sample_rate)
         timestamps = np.asarray(pd.date_range(start=starttime, end=end_time, periods=len(raw)))
-        # epoch_timestamps = timestamps[::self.epoch_len * self.sample_rate]
 
         t1_stamp = datetime.now()
         stamp_time = (t1_stamp - t0_stamp).seconds
@@ -89,8 +91,26 @@ class ECG:
         proc_time = (t1 - t0).seconds
         print("\n" + "Import complete ({} seconds).".format(round(proc_time, 2)))
 
-        # return timestamps, raw, epoch_timestamps
-        return timestamps, raw
+        # ACCELEROMETER DATA ==========================================================================================
+        self.accel_sample_rate = file.getSampleFrequencies()[1]
+
+        x = file.readSignal(chn=1)
+        y = file.readSignal(chn=2)
+        z = file.readSignal(chn=3)
+
+        if self.accel_sample_rate == 100:
+            x = x[::4]
+            y = y[::4]
+            z = z[::4]
+
+            self.accel_sample_rate = 25
+
+        vm = (np.sqrt(np.square(np.array([x, y, z])).sum(axis=0)) - 1000) / 1000
+        vm[vm < 0] = 0
+
+        # file.close()
+
+        return timestamps, raw, vm
 
     def check_quality(self):
         """Performs quality check using Orphanidou et al. (2015) algorithm that has been tweaked to factor in voltage
@@ -105,9 +125,6 @@ class ECG:
 
         validity_list = []  # window's validity (binary; 1 = invalid)
         epoch_hr = []  # window's HRs
-        avg_voltage = []  # window's voltage range
-        rr_sd = []  # window's RR SD
-        r_peaks = []  # all R peak indexes
 
         raw = [i for i in self.df_raw["Raw"]]
 
@@ -115,24 +132,13 @@ class ECG:
 
             qc = CheckQuality(ecg_object=self, start_index=start_index, epoch_len=self.epoch_len)
 
-            avg_voltage.append(qc.volt_range)
-
             if qc.valid_period:
                 validity_list.append("Valid")
                 epoch_hr.append(round(qc.hr, 2))
-                rr_sd.append(qc.rr_sd)
-
-                for peak in qc.r_peaks_index_all:
-                    r_peaks.append(peak)
-                for peak in qc.removed_peak:
-                    r_peaks.append(peak + start_index)
-
-                r_peaks = sorted(r_peaks)
 
             if not qc.valid_period:
                 validity_list.append("Invalid")
                 epoch_hr.append(0)
-                rr_sd.append(0)
 
         t1 = datetime.now()
         proc_time = (t1 - t0).seconds
@@ -144,9 +150,13 @@ class ECG:
         valid_hr = [epoch_hr[i] if validity_list[i] == "Valid"
                     else None for i in range(len(epoch_hr))]
 
+        vm = [i for i in self.df_accel["VM"]]
+        svm = [sum(vm[i:i+self.epoch_len*self.accel_sample_rate]) for
+               i in np.arange(0, len(vm), self.epoch_len * self.accel_sample_rate)]
+
         self.df_epoch = pd.DataFrame(list(zip(self.df_raw["Timestamp"].iloc[::self.sample_rate * self.epoch_len],
-                                              validity_list, epoch_hr, valid_hr)),
-                                     columns=["Timestamp", "Validity", "HR", "Valid HR"])
+                                              validity_list, epoch_hr, valid_hr, svm)),
+                                     columns=["Timestamp", "Validity", "HR", "Valid HR", "SVM"])
 
     def find_resting_hr(self, window_size, n_windows):
         """Function that calculates resting HR based on inputs.
@@ -246,7 +256,7 @@ class CheckQuality:
         self.raw_data = [i for i in ecg_object.df_raw["Raw"].iloc[self.start_index:
                                                                   self.start_index + self.epoch_len * self.fs]]
 
-        self.index_list = np.arange(0, len(self.raw_data), self.epoch_len*self.fs)
+        self.index_list = np.arange(0, len(self.raw_data), self.epoch_len * self.fs)
 
         self.rule_check_dict = {"Valid Period": False,
                                 "HR Valid": False, "HR": None,
@@ -296,9 +306,6 @@ class CheckQuality:
             self.calculate_correlation()
             self.apply_rules()
 
-        if self.valid_period:
-            self.r_peaks_index_all = [peak + start_index for peak in self.r_peaks]
-
     def prep_data(self):
         """Function that:
         -Initializes ecgdetector class instance
@@ -318,6 +325,10 @@ class CheckQuality:
         # Runs peak detection on raw data ----------------------------------------------------------------------------
         # Uses ecgdetectors package -> stationary wavelet transformation + Pan-Tompkins peak detection algorithm
         self.r_peaks = detectors.swt_detector(unfiltered_ecg=self.raw_data)
+
+        if len(self.r_peaks) == 3:
+            print("\nYou need to unedit ecgdetectors package.")
+            sys.exit()
 
         # Checks to see if there are enough potential peaks to correspond to correct HR range ------------------------
         # Requires number of beats in window that corresponds to ~40 bpm to continue
@@ -631,6 +642,8 @@ class Subject:
         self.rest_hr_window = rest_hr_window
         self.n_epochs_rest = n_epochs_rest
 
+        self.df_epoch = None
+
         self.fig_height = fig_height
         self.fig_width = fig_width
 
@@ -654,26 +667,68 @@ class Subject:
         self.ecg.calculate_percent_hrr()
 
         # Combines cropped accel and ECG data into one df
-        self.df_epoch = self.crop_df_epoch()
+        self.crop_df_epoch()
 
         self.activity_volume = None
         self.activity_df = None
         self.hr_epoch = None
+
+    @staticmethod
+    def check_file_overwrite(filename):
+        existing_files = os.listdir(os.getcwd())
+        pngs = [i for i in existing_files if "png" in i]
+        near_matches = []
+        if len(pngs) > 0:
+            for png in pngs:
+                if filename not in png:
+                    file_exists = False
+                if filename in png:
+                    file_exists = True
+                    near_matches.append(png)
+        if len(pngs) == 0:
+            file_exists = False
+        if file_exists:
+            near_matches = sorted(near_matches)
+            print(near_matches)
+            versions = []
+            for near_match in near_matches:
+                if "Version" in near_match:
+                    versions.append(int(near_match.split("Version")[1].split(".")[0]))
+                if "Version" not in near_match:
+                    pass
+            if len(versions) >= 1:
+                version = max(versions) + 1
+            if len(versions) == 0:
+                version = 1
+            print("File already exists.")
+            print("Saving new file as {}".format(filename.split(".")[0] + "_Version{}.png".format(version)))
+            return filename.split(".")[0] + "_Version{}.png".format(version)
+        if not file_exists:
+            return filename
 
     def sync_epochs(self):
         """Crops raw data from ECG and 1s epoched accelerometer data so files start at same time."""
 
         print("\nSyncing raw data so epochs align...")
 
+        # Finds start/stop times
         start = max(self.accel.df_epoch["Timestamp"].iloc[0], self.ecg.timestamps[0])
         stop = min(self.accel.df_epoch["Timestamp"].iloc[-1], self.ecg.timestamps[-1])
 
+        # ECG data
         hr = pd.DataFrame(list(zip(self.ecg.timestamps, self.ecg.raw)), columns=["Timestamp", "Raw"])
         hr = hr.loc[(hr["Timestamp"] >= start) & (hr["Timestamp"] <= stop)]
 
-        self.ecg.df_raw = hr
-        del self.ecg.timestamps, self.ecg.raw
+        # Bittium accel data
+        bf_accel = pd.DataFrame(list(zip(self.ecg.timestamps[::int(self.ecg.sample_rate / self.ecg.accel_sample_rate)],
+                                         self.ecg.accel_vm)), columns=["Timestamp", "VM"])
+        bf_accel = bf_accel.loc[(bf_accel["Timestamp"] >= start) & (bf_accel["Timestamp"] <= stop)]
 
+        self.ecg.df_raw = hr
+        self.ecg.df_accel = bf_accel
+        del self.ecg.timestamps, self.ecg.raw, self.ecg.accel_vm
+
+        # GENEActiv data
         self.accel.df_epoch = self.accel.df_epoch.loc[(self.accel.df_epoch["Timestamp"] >= start) &
                                                       (self.accel.df_epoch["Timestamp"] <= stop)]
 
@@ -691,15 +746,15 @@ class Subject:
                                            (self.accel.df_epoch["Timestamp"] <= stop)]
 
         df_ecg = self.ecg.df_epoch.loc[(self.ecg.df_epoch["Timestamp"] >= start) &
-                                       (self.ecg.df_epoch['Timestamp'] <= stop)]
+                                       (self.ecg.df_epoch["Timestamp"] <= stop)]
 
         df = pd.DataFrame(list(zip(df_accel["Timestamp"], df_accel["LAnkle"], df_accel["LWrist"],
-                                   df_ecg["Validity"], df_ecg["HR"], df_ecg["Valid HR"], df_ecg["HRR"])),
-                          columns=["Timestamp", "LAnkle", "LWrist", "HR Validity", "HR", "Valid HR", "HRR"])
+                                   df_ecg["Validity"], df_ecg["HR"], df_ecg["Valid HR"], df_ecg["HRR"], df_ecg["SVM"])),
+                          columns=["Timestamp", "LAnkle", "LWrist", "HR Validity", "HR", "Valid HR", "HRR", "Chest"])
 
         print("Complete.")
 
-        return df
+        self.df_epoch = df
 
     def plot_hr_wrist(self):
         """Plots LWrist and HR data. Marks intensity regions
@@ -764,7 +819,10 @@ class Subject:
         ax2.xaxis.set_major_formatter(xfmt)
         plt.xticks(rotation=45, fontsize=8)
 
-    def calculate_activity_volume(self, start=None, stop=None, remove_invalid_ecg=True):
+        plt.savefig("EpochedData_HRandLWrist.png")
+        print("Plot saved as png ({})".format("EpochedHRandLWristData.png"))
+
+    def calculate_activity_volume(self, start=None, stop=None, remove_invalid_ecg=True, show_plot=True):
         """Calculates activity volumes (minutes and percent of data) for LWrist and HR data. Able to crop.
 
            :arguments
@@ -847,25 +905,75 @@ class Subject:
         print("\nActivity volume (removed invalid ECG epochs = {})".format(remove_invalid_ecg))
         print(self.activity_df)
 
+        if show_plot:
+
+            df = self.activity_df[["LWrist", "HR"]]
+
+            plt.subplots(2, 2, figsize=(self.fig_width, self.fig_height))
+            plt.suptitle("Comparison between LWrist and HR activity volumes")
+            plt.subplots_adjust(hspace=.3)
+
+            plt.subplot(2, 2, 1)
+            plt.bar(["LWrist", "HR"], df.loc["Sedentary"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Sedentary")
+            plt.ylabel("Minutes")
+
+            plt.subplot(2, 2, 2)
+            plt.bar(["LWrist", "HR"], df.loc["Light"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Light")
+
+            plt.subplot(2, 2, 3)
+            plt.bar(["LWrist", "HR"], df.loc["Moderate"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.ylabel("Minutes")
+            plt.title("Moderate")
+
+            plt.subplot(2, 2, 4)
+            plt.bar(["LWrist", "HR"], df.loc["Vigorous"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Vigorous")
+
+            if start is None:
+                start = self.df_epoch.iloc[0]["Timestamp"]
+            if stop is None:
+                stop = self.df_epoch.iloc[-1]["Timestamp"]
+
+            start_format = datetime.strftime(datetime.strptime(str(start), "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H_%M_%S")
+            stop_format = datetime.strftime(datetime.strptime(str(stop), "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H_%M_%S")
+
+            f_name = self.check_file_overwrite("ActivityVolumes_InvalidECGRemoved{}_{}to{}".
+                                               format(remove_invalid_ecg, start_format, stop_format))
+
+            plt.savefig(f_name)
+            print("Plot saved as png ({})".format(f_name))
+
     def plot_ecg_validity_data(self):
+        """Calculates activity counts for chest, LWrist, and LAnkle during invalid and valid ECG signal periods.
+           Plots means ± SD as barplot.
+        """
 
-        m = s.df_epoch[["LAnkle", "LWrist", "HR Validity"]].groupby("HR Validity").mean()
-        sd = s.df_epoch[["LAnkle", "LWrist", "HR Validity"]].groupby("HR Validity").std()
+        m = self.df_epoch[["LAnkle", "LWrist", "Chest", "HR Validity"]].groupby("HR Validity").mean()
+        sd = self.df_epoch[["LAnkle", "LWrist", "Chest", "HR Validity"]].groupby("HR Validity").std()
 
-        plt.subplots(1, 2, figsize=(self.fig_width, self.fig_height))
-        plt.suptitle("ECG Validity by Ankle/Wrist Activity Counts")
+        plt.subplots(1, 3, figsize=(self.fig_width, self.fig_height))
+        plt.suptitle("ECG Validity by Activity Counts")
 
-        plt.subplot(1, 2, 1)
+        plt.subplot(1, 3, 1)
+        plt.title("Chest (mean ± SD)")
+        plt.bar(["Invalid ECG", "Valid ECG"], m["Chest"], edgecolor='black', color=['red', 'green'], alpha=.5,
+                yerr=sd["Chest"], capsize=4)
+
+        plt.ylabel("Activity Counts")
+
+        plt.subplot(1, 3, 2)
+        plt.title("LWrist (mean ± SD)")
+        plt.bar(["Invalid ECG", "Valid ECG"], m["LWrist"], edgecolor='black', color=['red', 'green'], alpha=.5,
+                yerr=sd["LWrist"], capsize=4)
+
+        plt.subplot(1, 3, 3)
         plt.title("LAnkle (mean ± SD)")
         plt.bar(["Invalid ECG", "Valid ECG"], m["LAnkle"], edgecolor='black', color=['red', 'green'], alpha=.5,
                 yerr=sd["LAnkle"], capsize=4)
 
-        plt.ylabel("Activity Counts")
-
-        plt.subplot(1, 2, 2)
-        plt.title("LWrist (mean ± SD)")
-        plt.bar(["Invalid ECG", "Valid ECG"], m["LWrist"], edgecolor='black', color=['red', 'green'], alpha=.5,
-                yerr=sd["LWrist"], capsize=4)
+        plt.savefig("ECG_ValidityData_ActivityCounts.png")
 
     def recalculate_hr_epochs(self, epoch_len=15, show_plot=True):
 
@@ -874,8 +982,6 @@ class Subject:
         validity_list = []  # window's validity (binary; 1 = invalid)
         epoch_hr = []  # window's HRs
         avg_voltage = []  # window's voltage range
-        rr_sd = []  # window's RR SD
-        r_peaks = []  # all R peak indexes
 
         raw = [i for i in self.ecg.df_raw["Raw"]]
 
@@ -888,19 +994,10 @@ class Subject:
             if qc.valid_period:
                 validity_list.append("Valid")
                 epoch_hr.append(round(qc.hr, 2))
-                rr_sd.append(qc.rr_sd)
-
-                for peak in qc.r_peaks_index_all:
-                    r_peaks.append(peak)
-                for peak in qc.removed_peak:
-                    r_peaks.append(peak + start_index)
-
-                r_peaks = sorted(r_peaks)
 
             if not qc.valid_period:
                 validity_list.append("Invalid")
                 epoch_hr.append(0)
-                rr_sd.append(0)
 
         print("Data has been re-epoched.")
 
@@ -931,12 +1028,93 @@ class Subject:
             ax1.xaxis.set_major_formatter(xfmt)
             plt.xticks(rotation=45, fontsize=8)
 
+            plt.savefig("HR_EpochComparison_{}_and_{}_seconds.png".format(self.epoch_len, epoch_len))
+
+    def plot_activity_counts(self):
+
+        fig, (ax1, ax2, ax3) = plt.subplots(3, sharex='col', figsize=(self.fig_width, self.fig_height))
+        plt.subplots_adjust(hspace=.30)
+        plt.suptitle("Activity Count Comparison ({}-second epochs)".format(self.epoch_len))
+
+        ax1.set_title("Chest")
+        ax1.plot(self.df_epoch["Timestamp"], self.df_epoch["Chest"], color='green')
+        ax1.set_ylabel("Counts")
+
+        ax2.plot(self.df_epoch["Timestamp"], self.df_epoch["LWrist"], color='dodgerblue')
+        ax2.set_title("LWrist")
+        ax2.set_ylabel("Counts")
+
+        ax3.plot(self.df_epoch["Timestamp"], self.df_epoch["LAnkle"], color='purple')
+        ax3.set_title("LAnkle")
+        ax3.set_ylabel("Counts")
+
+        xfmt = mdates.DateFormatter("%Y/%m/%d\n%H:%M:%S")
+        ax1.xaxis.set_major_formatter(xfmt)
+        plt.xticks(rotation=45, fontsize=8)
+
+        plt.savefig("EpochedData_AllActivityCounts.png")
+
+    def plot_ecg_validity(self, start=None, stop=None):
+        """Plots raw ECG data and shades regions of invalid ECG signal. Able to crop by timestamp."""
+
+        if start is None and stop is None:
+            df = self.df_epoch[["Timestamp", "HR Validity"]].copy()
+            df_ecg = self.ecg.df_raw[["Timestamp", "Raw"]]
+
+        if start is not None and stop is not None:
+            df = self.df_epoch.loc[(self.df_epoch["Timestamp"] >= start) &
+                                   (self.df_epoch["Timestamp"] <= stop)][["Timestamp", "HR Validity"]]
+            df_ecg = self.ecg.df_raw.loc[(self.ecg.df_raw["Timestamp"] >= start) &
+                                         (self.ecg.df_raw["Timestamp"] <= stop)][["Timestamp", "Raw"]]
+
+        df["HR Validity"] = [-32768 if i == "Valid" else 32768 for i in df["HR Validity"]]
+
+        fig, ax1 = plt.subplots(1, figsize=(self.fig_width, self.fig_height))
+        plt.suptitle("Raw ECG with invalid periods shaded")
+
+        ax1.plot(df_ecg["Timestamp"], df_ecg["Raw"], color='red')
+        ax1.set_ylabel("Voltage")
+
+        ax1.fill_between(df["Timestamp"], -32768, df["HR Validity"], color='grey', alpha=.5)
+
+        xfmt = mdates.DateFormatter("%Y/%m/%d\n%H:%M:%S")
+        ax1.xaxis.set_major_formatter(xfmt)
+        plt.xticks(rotation=45, fontsize=8)
+
+        if start is None:
+            start = self.df_epoch.iloc[0]["Timestamp"]
+        if stop is None:
+            stop = self.df_epoch.iloc[-1]["Timestamp"]
+
+        start_format = datetime.strftime(datetime.strptime(str(start), "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H_%M_%S")
+        stop_format = datetime.strftime(datetime.strptime(str(stop), "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d %H_%M_%S")
+
+        f_name = self.check_file_overwrite("ECG_SignalValidity_{}to{}".
+                                           format(start_format, stop_format))
+
+        plt.savefig(f_name)
+        print("Plot saved as png ({})".format(f_name))
+
 
 s = Subject(ecg_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Anton_ECG.edf",
             ecg_downsample_ratio=2, epoch_len=15,
             leftwrist_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Epoch_1s_LWrist.csv",
             leftankle_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Epoch_1s_LAnkle.csv")
 
-s.calculate_activity_volume(remove_invalid_ecg=True, start=None, stop=None)
+# Calculates activity volume using HR and scaled LWrist cutpoints in specified time period
+# s.calculate_activity_volume(remove_invalid_ecg=True, start=None, stop=None, show_plot=True)
+
+# Plots HR and LWrist activity count data with intensity ranges shaded
 # s.plot_hr_wrist()
-s.recalculate_hr_epochs(epoch_len=45, show_plot=True)
+
+# Plots chest, LWrist, and LAnkle activity counts
+# s.plot_activity_counts()
+
+# Re-calculates HR averaged using new epoch lengths
+# s.recalculate_hr_epochs(epoch_len=45, show_plot=True)
+
+# Plot raw ECG data with invalid periods marked
+# s.plot_ecg_validity(start=None, stop=None)
+
+# Plots means ± SD of activity counts in valid and invalid ECG signal epochs
+# s.plot_ecg_validity_data()
