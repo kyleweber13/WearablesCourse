@@ -945,7 +945,7 @@ class Subject:
             plt.savefig(f_name)
             print("Plot saved as png ({})".format(f_name))
 
-    def plot_ecg_validity_data(self):
+    def plot_ecg_validity_summary(self):
         """Calculates activity counts for chest, LWrist, and LAnkle during invalid and valid ECG signal periods.
            Plots means ± SD as barplot.
         """
@@ -973,7 +973,7 @@ class Subject:
         plt.bar(["Invalid ECG", "Valid ECG"], m["LAnkle"], edgecolor='black', color=['red', 'green'], alpha=.5,
                 yerr=sd["LAnkle"], capsize=4)
 
-        plt.savefig("ECG_ValidityData_ActivityCounts.png")
+        plt.savefig("ECG_ValiditySummary_ActivityCounts.png")
 
     def recalculate_hr_epochs(self, epoch_len=15, show_plot=True):
 
@@ -1117,4 +1117,4 @@ s = Subject(ecg_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCours
 # s.plot_ecg_validity(start=None, stop=None)
 
 # Plots means ± SD of activity counts in valid and invalid ECG signal epochs
-# s.plot_ecg_validity_data()
+s.plot_ecg_validity_summary()
