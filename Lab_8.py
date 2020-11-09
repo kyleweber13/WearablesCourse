@@ -226,7 +226,6 @@ class ECG:
         ax1.xaxis.set_major_formatter(xfmt)
         plt.xticks(rotation=45, fontsize=8)
 
-
 class CheckQuality:
     """Class method that implements the Orphanidou ECG signal quality assessment algorithm on raw ECG data.
 
@@ -630,7 +629,8 @@ class Accel:
 class Subject:
 
     def __init__(self, ecg_filepath=None, leftwrist_filepath=None, leftankle_filepath=None, epoch_len=15,
-                 ecg_downsample_ratio=2, age=33, rest_hr_window=60, n_epochs_rest=5, fig_height=7, fig_width=12):
+                 ecg_downsample_ratio=2, age=33, weight=75,
+                 rest_hr_window=60, n_epochs_rest=5, fig_height=7, fig_width=12):
 
         self.ecg_filepath = ecg_filepath
         self.lwrist_filepath = leftwrist_filepath
@@ -639,6 +639,7 @@ class Subject:
         self.epoch_len = epoch_len
         self.downsample_ratio = ecg_downsample_ratio
         self.age = age
+        self.weight = weight  # kg
         self.rest_hr_window = rest_hr_window
         self.n_epochs_rest = n_epochs_rest
 
@@ -648,7 +649,8 @@ class Subject:
         self.fig_width = fig_width
 
         # ECG data object
-        self.ecg = ECG(filepath=self.ecg_filepath, downsample_ratio=self.downsample_ratio, epoch_len=self.epoch_len)
+        self.ecg = ECG(filepath=self.ecg_filepath, downsample_ratio=self.downsample_ratio, epoch_len=self.epoch_len,
+                       age=self.age)
 
         # Accelerometer data object
         self.accel = Accel(leftwrist_filepath=self.lwrist_filepath,
@@ -1095,6 +1097,105 @@ class Subject:
         plt.savefig(f_name)
         print("Plot saved as png ({})".format(f_name))
 
+    def calculate_hr_ee(self):
+        """Calculates Physical Activity Intensity using equation from Brage et al., 2004.
+        Brage, S., Brage, N., Franks, P., Ekelund, U., Wong, M., Andersen, L., et al. (2004). Branched equation
+        modeling of simultaneous accelerometry and heart rate monitoring improves estimate of directly measured
+        physical activity energy expenditure. J Appl Physiol. 96. 343-351.
+        """
+
+        # HR - resting HR = net HR
+        net_hr = np.array([i - self.ecg.rest_hr if i is not None else None for i in self.df_epoch["Valid HR"]])
+
+        # Sets values below 0% HRR (below resting HR) to 0
+        net_hr[net_hr <= 0] = 0
+
+        # Equation from Brage et al., 2004. Active EE in kJ/kg/min
+        kj_kg_min = [.011 * (hr ** 2) + 5.82 * hr if hr is not None else None for hr in net_hr]
+
+        # Converts kJ to kcal: relative EE (kcal/kg/min)
+        kcal_kg_min = [k / 4.184 if k is not None else None for k in kj_kg_min]
+
+        # Converts relative EE to absolute EE (kcal/min)
+        kcal_min = [k * self.weight / 1000 if k is not None else None for k in kcal_kg_min]
+
+        # kcals per epoch instead of per minute
+        kcal_epoch = [k * (self.epoch_len / 60) for k in kcal_min]
+
+        total_ee = sum([i for i in kcal_epoch if not np.isnan(i)])
+        print("-Total energy expenditure estimated from HR is {} kcal.".format(int(total_ee)))
+
+        self.df_epoch["HR_EE"] = kcal_min
+
+    def calculate_wrist_ee(self):
+        """Calculates Wrist accelerometer intensity using regression equation from Powell et al., 2017."""
+
+        if self.epoch_len != 15:
+            print("\nThis equation is designed to work for 15-second epochs. Please try again.")
+            return None
+
+        data = [i * (30 / self.accel.lwrist_samplerate) for i in self.df_epoch["LWrist"]]
+
+        # Modified equation from Powell et al. 2017. Removed resting component (constant = 1.15451)
+        mets = [.022261 * i for i in data]
+
+        # Converts METs to relative VO2 (mL O2/kg/min)
+        r_vo2 = [3.5 * m for m in mets]
+
+        # Converts relative VO2 to absolute VO2 (L O2/kg/min)
+        a_vo2 = [i * self.weight / 1000 for i in r_vo2]
+
+        # Converts absolute VO2 to kcal/min (assumes 1 L O2 -> 4.825 kcal)
+        kcal_min = [a * 4.825 for a in a_vo2]
+
+        # Calculates kcal/epoch
+        kcal_epoch = [k * (self.epoch_len / 60) for k in kcal_min]
+
+        total_ee = sum([i for i in kcal_epoch if not np.isnan(i)])
+        print("-Total energy expenditure estimated from Wrist is {} kcal.".format(int(total_ee)))
+
+        self.df_epoch["Wrist_EE"] = kcal_min
+
+    def plot_ee(self):
+
+        # Calculates active energy expenditure (level above resting) -------------------------------------------------
+        print("\nCalculating energy expenditure...")
+        self.calculate_hr_ee()
+        self.calculate_wrist_ee()
+
+        df = s.df_epoch.loc[s.df_epoch["HR Validity"] == "Valid"]
+
+        wrist = df["Wrist_EE"].sum() * (s.epoch_len / 60)
+        hr = df["HR_EE"].sum() * (s.epoch_len / 60)
+
+        print("    -Ignoring invalid ECG periods: wrist EE = {} kcal.".format(int(wrist)))
+
+        # Plotting ---------------------------------------------------------------------------------------------------
+        fig, (ax1, ax2, ax3) = plt.subplots(3, sharex='col', figsize=(self.fig_width, self.fig_height))
+        plt.suptitle("Active Energy Expenditure")
+        plt.subplots_adjust(hspace=.3)
+
+        ax1.set_title("LWrist")
+        ax1.plot(self.df_epoch["Timestamp"], self.df_epoch["LWrist"], color='black', label='Wrist')
+        ax1.set_ylabel("Counts")
+
+        ax2.set_title("Heart Rate")
+        ax2.plot(self.df_epoch["Timestamp"], self.df_epoch["Valid HR"], color='red', label='HR')
+        ax2.set_ylabel("HR (bpm)")
+        ax2.axhline(y=self.ecg.rest_hr, linestyle='dashed', color='grey', label='Rest HR')
+        ax2.legend()
+
+        ax3.set_title("Energy Expenditure")
+        ax3.plot(self.df_epoch["Timestamp"], self.df_epoch["HR_EE"], color='red', label='HR')
+        ax3.plot(self.df_epoch["Timestamp"], self.df_epoch["Wrist_EE"], color='black', label='Wrist')
+        ax3.axhline(y=0, linestyle='dashed', color='grey')
+        ax3.set_ylabel("kcal/minute")
+        ax3.legend()
+
+        xfmt = mdates.DateFormatter("%Y/%m/%d\n%H:%M:%S")
+        ax1.xaxis.set_major_formatter(xfmt)
+        plt.xticks(rotation=45, fontsize=8)
+
 
 s = Subject(ecg_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 8/Anton_ECG.edf",
             ecg_downsample_ratio=2, epoch_len=15,
@@ -1117,4 +1218,7 @@ s = Subject(ecg_filepath="/Users/kyleweber/Desktop/Python Scripts/WearablesCours
 # s.plot_ecg_validity(start=None, stop=None)
 
 # Plots means ± SD of activity counts in valid and invalid ECG signal epochs
-s.plot_ecg_validity_summary()
+# s.plot_ecg_validity_summary()
+
+# Calculates and plots time series active energy expenditure between HR and LWrist
+# s.plot_ee()
