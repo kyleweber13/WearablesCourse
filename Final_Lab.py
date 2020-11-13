@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore')
 
 class Subject:
 
-    def __init__(self, event_filename=None, processed_filename=None, fig_width=10, fig_height=7):
+    def __init__(self, event_filename=None, processed_filename=None, age=71, fig_width=10, fig_height=7):
 
         self.filename = processed_filename
         self.event_filename = event_filename
@@ -24,6 +24,10 @@ class Subject:
 
         self.df_epoch = None
         self.df_event = None
+        self.age = 71
+        self.rest_hr = 50
+
+        self.hr_zones = {"Light": 0, "Moderate": 0, "Vigorous": 0}
 
         # Runs methods -----------------------------------------------------------------------------------------------
         self.import_processed_data()
@@ -32,6 +36,10 @@ class Subject:
             self.flag_sleep()
         if "Wear_Status" not in self.df_epoch.keys() and self.event_filename is not None:
             self.flag_nonwear()
+
+        self.calculate_resting_hr()
+
+        self.calculate_hrr()
 
     def import_processed_data(self):
 
@@ -90,6 +98,54 @@ class Subject:
 
         print("Complete.")
 
+    def calculate_resting_hr(self):
+
+        hrs = [i for i in self.df_epoch["HR"]]
+
+        roll_avg = [sum(hrs[i:i+4])/4 if True not in np.isnan(hrs[i:i+4]) else None for i in range(len(hrs)-3)]
+
+        sorted_hrs = sorted([i for i in roll_avg if i is not None])
+
+        low30 = sorted_hrs[0:30]
+
+        self.rest_hr = round(sum(low30)/30, 1)
+
+    def calculate_hrr(self):
+
+        hrr = 208 - .7 * self.age - self.rest_hr
+
+        # HR zones for 30, 40, 60% HRR
+        self.hr_zones["Light"] = self.rest_hr + .3 * hrr
+        self.hr_zones["Moderate"] = self.rest_hr + .4 * hrr
+        self.hr_zones["Vigorous"] = self.rest_hr + .6 * hrr
+
+        # Calculates %HRR from HR
+        hrr_list = np.array([round(100 * (hr - self.rest_hr) / hrr, 1) if not np.isnan(hr) else None for
+                             hr in self.df_epoch["HR"]])
+
+        for i, hr in enumerate(hrr_list):
+            if hr is not None and hr < 0:
+                hrr_list[i] = 0
+
+        self.df_epoch["HRR"] = hrr_list
+
+        # Calculates HR intensity
+        hr_int = []
+        for hr in self.df_epoch["HR"]:
+            if np.isnan(hr):
+                hr_int.append(None)
+            if hr is not None:
+                if hr < self.hr_zones["Light"]:
+                    hr_int.append(0)
+                if self.hr_zones["Light"] <= hr < self.hr_zones["Moderate"]:
+                    hr_int.append(1)
+                if self.hr_zones["Moderate"] <= hr < self.hr_zones["Vigorous"]:
+                    hr_int.append(2)
+                if self.hr_zones["Vigorous"] <= hr:
+                    hr_int.append(3)
+
+        self.df_epoch["HR_Intensity"] = hr_int
+
     def plot_time_series(self, start=None, stop=None):
 
         if start is not None and stop is not None:
@@ -135,4 +191,6 @@ class Subject:
 
 x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_Epoched.csv",
             event_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_EventLog.csv")
-x.plot_time_series(start="2020-03-04 00:00:00", stop="2020-03-05 00:00:00")
+
+# Plots LWrist counts and HR. Sleep/nonwear periods shaded.
+# x.plot_time_series(start=None, stop=None)
