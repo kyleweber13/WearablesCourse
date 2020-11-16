@@ -29,6 +29,13 @@ class Subject:
 
         self.hr_zones = {"Light": 0, "Moderate": 0, "Vigorous": 0}
 
+        # Scaled to 75 Hz; default 15-second epochs
+        self.cutpoint_dict = {"NonDomLight": round(47 * 75 / 30, 2),
+                              "NonDomModerate": round(64 * 75 / 30, 2),
+                              "NonDomVigorous": round(157 * 75 / 30, 2)}
+
+        self.activity_volume = None
+
         # Runs methods -----------------------------------------------------------------------------------------------
         self.import_processed_data()
 
@@ -182,12 +189,12 @@ class Subject:
             if row.Event == "Sleep" and (start <= row.Start <= stop or start <= row.Stop <= stop):
                 ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, max(self.df_epoch["LWrist"])],
                                   color='navy', alpha=.5)
-                ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, 200],
+                ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, max(self.df_epoch["HR"].dropna()) * 1.1],
                                   color='navy', alpha=.5)
             if row.Event == "Nonwear" and (start <= row.Start <= stop or start <= row.Stop <= stop):
                 ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, max(self.df_epoch["LWrist"])],
                                   color='grey', alpha=.5)
-                ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, 200],
+                ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, max(self.df_epoch["HR"].dropna()) * 1.1],
                                   color='grey', alpha=.5)
 
         window_len = (stop - start).total_seconds()
@@ -432,6 +439,200 @@ class Subject:
                           label="Healthy ({}%)".format(round(sum(h[0][10:]), 1)))
         plt.legend()
 
+    def analyze_sleep(self):
+        """Barplot of nightly sleep durations. Recommended range marked."""
+
+        df = self.df_event.loc[self.df_event["Event"] == "Sleep"]
+        df["Durations"] = [(df["Stop"].iloc[i] - df["Start"].iloc[i]).total_seconds() / 3600 for
+                           i in range(df.shape[0])]
+
+        plt.bar([df["Start"].iloc[i].day_name() for i in range(df.shape[0])],
+                df["Durations"], color='slategrey', alpha=.75, edgecolor='black')
+        plt.ylabel("Hours per night")
+        plt.title("Nightly Sleep Duration")
+
+        plt.axhline(y=9, color='green', linestyle='dashed', label="Recommended max.")
+        plt.axhline(y=7, color='red', linestyle='dashed', label="Recommended min.")
+        plt.legend(loc='lower right')
+
+        for sleep in df.itertuples():
+            plt.text(x=sleep.Index-.20, y=4, s=str(round(sleep.Durations, 1)) + "\nhours")
+
+    def calculate_activity_volume(self, remove_invalid_ecg=True, show_plot=True):
+        """Calculates activity volumes (minutes and percent of data) for LWrist and HR data. Able to crop.
+
+           :argument
+           -remove_invalid_ecg: boolean whether to include invalid ECG signal periods.
+                                If True, the total volume of data will be the same between LWrist and HR data.
+                                If False, LWrist contains more data.
+        """
+
+        df = self.df_epoch.loc[self.df_epoch["Wear_Status"] == "Wear"]
+
+        if remove_invalid_ecg:
+            df = df.loc[df["ECG_Validity"] == "Valid"]
+
+        print("\nCalculating activity data from {} to {} "
+              "in 15-second epochs...".format(df.iloc[0]["Timestamp"], df.iloc[-1]['Timestamp']))
+
+        # Non-dominant (left) wrist -----------------------------------------------------------------------------------
+        nd_sed_epochs = df["LWrist"].loc[(df["LWrist"] < self.cutpoint_dict["NonDomLight"])].shape[0]
+
+        nd_light_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["NonDomLight"]) &
+                                           (df["LWrist"] < self.cutpoint_dict["NonDomModerate"])].shape[0]
+
+        nd_mod_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["NonDomModerate"]) &
+                                         (df["LWrist"] < self.cutpoint_dict["NonDomVigorous"])].shape[0]
+
+        nd_vig_epochs = df["LWrist"].loc[(df["LWrist"] >= self.cutpoint_dict["NonDomVigorous"])].shape[0]
+
+        # Heart rate -------------------------------------------------------------------------------------------------
+        hr_sed_epochs = df.loc[df["HRR"] < 30].shape[0]
+        hr_light_epochs = df.loc[(df["HRR"] >= 30) & (df["HRR"] < 40)].shape[0]
+        hr_mod_epochs = df.loc[(df["HRR"] >= 40) & (df["HRR"] < 60)].shape[0]
+        hr_vig_epochs = df.loc[df["HRR"] >= 60].shape[0]
+
+        # Data storage ------------------------------------------------------------------------------------------------
+        activity_minutes = {"LWristSed": round(nd_sed_epochs / 4, 2),
+                            "LWristLight": round(nd_light_epochs / 4, 2),
+                            "LWristMod": round(nd_mod_epochs / 4, 2),
+                            "LWristVig": round(nd_vig_epochs / 4, 2),
+                            "HRSed": round(hr_sed_epochs / 4, 2),
+                            "HRLight": round(hr_light_epochs / 4, 2),
+                            "HRMod": round(hr_mod_epochs / 4, 2),
+                            "HRVig": round(hr_vig_epochs / 4, 2),
+                            }
+
+        activity_minutes["LWristMVPA"] = activity_minutes["LWristMod"] + activity_minutes["LWristVig"]
+        activity_minutes["HRMVPA"] = activity_minutes["HRMod"] + activity_minutes["HRVig"]
+
+        self.activity_volume = activity_minutes
+        lwrist = [activity_minutes["LWristSed"], activity_minutes["LWristLight"],
+                  activity_minutes["LWristMod"], activity_minutes["LWristVig"], activity_minutes["LWristMVPA"]]
+
+        hr = [activity_minutes["HRSed"], activity_minutes["HRLight"],
+              activity_minutes["HRMod"], activity_minutes["HRVig"], activity_minutes["HRMVPA"]]
+
+        self.activity_df = pd.DataFrame(list(zip(lwrist, hr)), columns=["LWrist", "HR"])
+        self.activity_df.index = ["Sedentary", "Light", "Moderate", "Vigorous", "MVPA"]
+
+        self.activity_df["LWrist%"] = 100 * self.activity_df["LWrist"] / \
+                                      sum(self.activity_df["LWrist"].loc[["Sedentary", "Light",
+                                                                          "Moderate", "Vigorous"]])
+
+        self.activity_df["LWrist%"] = self.activity_df["LWrist%"].round(2)
+
+        self.activity_df["HR%"] = 100 * self.activity_df["HR"] / \
+                                      sum(self.activity_df["HR"].loc[["Sedentary", "Light",
+                                                                      "Moderate", "Vigorous"]])
+
+        self.activity_df["HR%"] = self.activity_df["HR%"].round(2)
+
+        print("\nActivity volume (removed invalid ECG epochs = {})".format(remove_invalid_ecg))
+        print(self.activity_df)
+
+        if show_plot:
+
+            df = self.activity_df[["LWrist", "HR"]]
+
+            plt.subplots(2, 2, figsize=(self.fig_width, self.fig_height))
+            plt.suptitle("Comparison between LWrist and HR activity volumes")
+            plt.subplots_adjust(hspace=.3)
+
+            plt.subplot(2, 2, 1)
+            plt.bar(["LWrist", "HR"], df.loc["Sedentary"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Sedentary")
+            plt.ylabel("Minutes")
+
+            plt.subplot(2, 2, 2)
+            plt.bar(["LWrist", "HR"], df.loc["Light"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Light")
+
+            plt.subplot(2, 2, 3)
+            plt.bar(["LWrist", "HR"], df.loc["Moderate"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.ylabel("Minutes")
+            plt.title("Moderate")
+
+            plt.subplot(2, 2, 4)
+            plt.bar(["LWrist", "HR"], df.loc["Vigorous"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Vigorous")
+
+    def calculate_daily_activity_volume(self, save_csv=False):
+
+        print("\nCalculating daily activity volumes...")
+
+        date_list = sorted([j for j in set(i.date() for i in self.df_epoch["Timestamp"])])
+
+        # Sets df
+        df = self.df_epoch.copy()
+
+        df["Date"] = [i.date() for i in self.df_epoch["Timestamp"]]
+
+        # Calculates daily activity
+        wrist_sed = []
+        wrist_light = []
+        wrist_mvpa = []
+        hr_sed = []
+        hr_light = []
+        hr_mvpa = []
+
+        for date in date_list:
+            data = df.loc[df["Date"] == date]
+
+            values_wrist = [i/4 for i in pd.value_counts(data["Wrist_Intensity"])]
+            values_hr = [i/4 for i in pd.value_counts(data["HR_Intensity"])]
+
+            wrist_sed.append(values_wrist[0])
+            wrist_light.append(values_wrist[1])
+            wrist_mvpa.append(sum(values_wrist[2:]))
+
+            hr_sed.append(values_hr[0])
+            hr_light.append(values_hr[1])
+            hr_mvpa.append(sum(values_hr[2:]))
+
+        # PLOTTING ---------------------------------------------------------------------------------------------------
+        day_list = [j for j in [datetime.strftime(i, "%a") for i in date_list]]
+        plt.subplots(2, 3, figsize=(self.fig_width, self.fig_height))
+        plt.subplots_adjust(hspace=.25)
+        plt.title("Daily Activity")
+
+        # WRIST
+        plt.subplot(2, 3, 1)
+        plt.bar(day_list, wrist_sed, color='grey', edgecolor='black')
+        plt.title("Wrist Sedentary")
+        plt.ylabel("Minutes")
+
+        plt.subplot(2, 3, 2)
+        plt.bar(day_list, wrist_light, color='green', edgecolor='black')
+        plt.title("Wrist Light")
+
+        plt.subplot(2, 3, 3)
+        plt.bar(day_list, wrist_mvpa, color='orange', edgecolor='black')
+        plt.title("Wrist MVPA")
+
+        # HR
+        plt.subplot(2, 3, 4)
+        plt.bar(day_list, hr_sed, color='grey', edgecolor='black')
+        plt.title("HR Sedentary")
+        plt.ylabel("Minutes")
+
+        plt.subplot(2, 3, 5)
+        plt.bar(day_list, hr_light, color='green', edgecolor='black')
+        plt.title("HR Light")
+
+        plt.subplot(2, 3, 6)
+        plt.bar(day_list, hr_mvpa, color='orange', edgecolor='black')
+        plt.title("HR MVPA")
+
+        # Dataframe ---------------------------------------------------------------------------------------------------
+        df_vol = pd.DataFrame(list(zip(day_list, wrist_sed, hr_sed, wrist_light, hr_light, wrist_mvpa, hr_mvpa)),
+                              columns=["Day", "Wrist_Sed", "HR_Sed", "Wrist_Light",
+                                       "HR_Light", "Wrist_MVPA", "HR_MVPA"])
+
+        if save_csv:
+            df_vol.to_csv("DailyActivityVolume.csv", index=False)
+            print("Saved file as DailyActivityVolume.csv.")
+
 
 x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_Epoched.csv",
             event_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_EventLog.csv")
@@ -447,3 +648,9 @@ x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/Wearable
 
 # Finds MVPA bouts of duration min_dur with allowance for break of duration breaktime (minutes)
 # x.find_mvpa_bouts(min_dur=10, breaktime=2)
+
+# Calculates total activity volumes for LWrist and HR data
+# x.calculate_activity_volume()
+
+# Calculates daily activity volumes for LWrist and HR data. Able to save as csv
+# x.calculate_daily_activity_volume(save_csv=False)
