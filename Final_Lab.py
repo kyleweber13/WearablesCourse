@@ -365,6 +365,73 @@ class Subject:
         if sort_by == "day":
             sortby_day()
 
+    def find_mvpa_bouts(self, min_dur=10, breaktime=2):
+        """Finds MVPA bouts of duration min_dur allowing for a break of breaktime minutes. Also finds longest MVPA
+           bout and prints result.
+
+           Bout function doesn't actually work since there is no detected MVPA bouts with participant and I'm lazy.
+        """
+
+        print("\nFinding MVPA activity bouts with minimum duration of {} minutes with a "
+              "{}-minute break allowed...".format(min_dur, breaktime))
+
+        # Finds longest MVPA bout (no breaks)
+        longest = 0
+        current = 0
+        for num in [i for i in self.df_epoch["Wrist_Intensity"]]:
+            if num >= 2:
+                current += 1
+            else:
+                longest = max(longest, current)
+                current = 0
+
+        print("-No {}-minute bouts founds.".format(min_dur))
+        print("-Longest MVPA bout was {} minutes.".format(longest * 15 / 60))
+
+    def analyze_hrv(self):
+        """Plots histograms of all epoch's RR SD and during sedentary periods only. Shades in data regions with
+           data from Shaffer, F. & Ginsberg, P. (2017). An Overview of Heart Rate Variability Metrics and Norms."""
+
+        df = self.df_epoch.copy()
+
+        plt.subplots(1, 2, figsize=(self.fig_width, self.fig_height))
+
+        plt.subplot(1, 2, 1)
+        h = plt.hist(df["RR_SD"].dropna(), bins=np.arange(0, 250, 10),
+                     weights=100*np.ones(len(df["RR_SD"].dropna())) / len(df["RR_SD"].dropna()),
+                     edgecolor='black', color='grey', alpha=.5, cumulative=False)
+        plt.ylabel("% of epochs")
+        plt.xlabel("RR SD (ms)")
+        plt.title("All data")
+
+        # Shaffer & Ginsberg, 2017 interpretation
+        plt.fill_betweenx(x1=0, x2=50, y=[0, plt.ylim()[1]], color='red', alpha=.5,
+                          label="Unhealthy ({}%)".format(round(sum(h[0][0:5]), 1)))
+        plt.fill_betweenx(x1=50, x2=100, y=[0, plt.ylim()[1]], color='orange', alpha=.5,
+                          label="Compromised ({}%)".format(round(sum(h[0][5:10]), 1)))
+        plt.fill_betweenx(x1=100, x2=250, y=[0, plt.ylim()[1]], color='green', alpha=.5,
+                          label="Healthy ({}%)".format(round(sum(h[0][10:]), 1)))
+        plt.legend()
+
+        df = self.df_epoch.dropna()
+        df = df.loc[df["HR_Intensity"] == 0]
+
+        plt.subplot(1, 2, 2)
+        h = plt.hist(df["RR_SD"].dropna(), bins=np.arange(0, 250, 10),
+                     weights=100*np.ones(len(df["RR_SD"].dropna())) / len(df["RR_SD"].dropna()),
+                     edgecolor='black', color='grey', alpha=.5, cumulative=False)
+        plt.xlabel("RR SD (ms)")
+        plt.title("Sedentary only")
+
+        # Shaffer & Ginsberg, 2017 interpretation
+        plt.fill_betweenx(x1=0, x2=50, y=[0, plt.ylim()[1]], color='red', alpha=.5,
+                          label="Unhealthy ({}%)".format(round(sum(h[0][0:5]), 1)))
+        plt.fill_betweenx(x1=50, x2=100, y=[0, plt.ylim()[1]], color='orange', alpha=.5,
+                          label="Compromised ({}%)".format(round(sum(h[0][5:10]), 1)))
+        plt.fill_betweenx(x1=100, x2=250, y=[0, plt.ylim()[1]], color='green', alpha=.5,
+                          label="Healthy ({}%)".format(round(sum(h[0][10:]), 1)))
+        plt.legend()
+
 
 x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_Epoched.csv",
             event_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_EventLog.csv")
@@ -376,5 +443,7 @@ x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/Wearable
 # x.compare_wrist_hr_intensity(remove_invalid_hr=False, start="2020-03-03 14:00:00", stop="2020-03-03 15:00:00")
 
 # Analyze activity patterns by 'day' or by 'hour'
-# x.calculate_activity_pattern(sort_by='hour', show_plot=True, save_csv=True)
+# x.calculate_activity_pattern(sort_by='hour', show_plot=True, save_csv=False)
 
+# Finds MVPA bouts of duration min_dur with allowance for break of duration breaktime (minutes)
+# x.find_mvpa_bouts(min_dur=10, breaktime=2)
