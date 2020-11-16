@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore')
 
 class Subject:
 
-    def __init__(self, event_filename=None, processed_filename=None, age=71, fig_width=10, fig_height=7):
+    def __init__(self, event_filename=None, processed_filename=None, age=71, weight=66, fig_width=10, fig_height=7):
 
         self.filename = processed_filename
         self.event_filename = event_filename
@@ -24,7 +24,8 @@ class Subject:
 
         self.df_epoch = None
         self.df_event = None
-        self.age = 71
+        self.age = age
+        self.weight = weight
         self.rest_hr = 50
 
         self.hr_zones = {"Light": 0, "Moderate": 0, "Vigorous": 0}
@@ -35,6 +36,7 @@ class Subject:
                               "NonDomVigorous": round(157 * 75 / 30, 2)}
 
         self.activity_volume = None
+        self.df_daily_volumes = None
 
         # Runs methods -----------------------------------------------------------------------------------------------
         self.import_processed_data()
@@ -158,7 +160,41 @@ class Subject:
 
         self.df_epoch["HR_Intensity"] = hr_int
 
-    def plot_time_series(self, start=None, stop=None):
+    def heartrate_histogram(self, save_plot=False):
+
+        print("\nGenerating histogram of all heart rates...")
+
+        hr = [i for i in self.df_epoch["HR"] if not np.isnan(i)]
+
+        plt.axvline(x=self.rest_hr, linestyle='dashed', color='black', label='Resting HR')
+        plt.axvline(x=208 - .7 * self.age, linestyle='dashed', color='red', label="Max HR")
+
+        plt.fill_between(x=[0, self.hr_zones["Light"]], y1=0, y2=100,
+                         color='grey', alpha=.5, label="Sedentary")
+        plt.fill_between(x=[self.hr_zones["Light"], self.hr_zones["Moderate"]], y1=0, y2=100,
+                         color='green', alpha=.5, label="Light")
+        plt.fill_between(x=[self.hr_zones["Moderate"], self.hr_zones["Vigorous"]], y1=0, y2=100,
+                         color='orange', alpha=.5, label="Moderate")
+        plt.fill_between(x=[self.hr_zones["Vigorous"], 208 - .7 * self.age], y1=0, y2=100,
+                         color='red', alpha=.5, label="Vigorous")
+
+        data = plt.hist(hr, bins=np.arange(0, 200, 5), weights=100 * np.ones(len(hr)) / len(hr),
+                        color='white', alpha=.5, edgecolor='black')
+        plt.xlabel("HR (bpm)")
+        plt.ylabel("% of epochs")
+        plt.title("HR Distribution")
+
+        plt.legend(loc='upper right')
+        plt.ylim(0, max(data[0] * 1.05))
+        plt.xlim(40, (208 - .7 * self.age) * 1.02)
+
+        if save_plot:
+            print("Plot saved as HR_Histogram.png")
+            plt.savefig("HR_Histogram.png")
+
+    def plot_time_series(self, start=None, stop=None, show_events=True, show_thresholds=False, save_plot=False):
+
+        print("\nPlotting time series Wrist and HR data...")
 
         if start is not None and stop is not None:
             df = self.df_epoch.loc[(self.df_epoch["Timestamp"] >= start) & (self.df_epoch["Timestamp"] <= stop)]
@@ -184,23 +220,37 @@ class Subject:
         ax2.xaxis.set_major_formatter(xfmt)
         plt.xticks(rotation=45, fontsize=8)
 
-        for row in self.df_event.itertuples():
+        if show_events:
+            for row in self.df_event.itertuples():
 
-            if row.Event == "Sleep" and (start <= row.Start <= stop or start <= row.Stop <= stop):
-                ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, max(self.df_epoch["LWrist"])],
-                                  color='navy', alpha=.5)
-                ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, max(self.df_epoch["HR"].dropna()) * 1.1],
-                                  color='navy', alpha=.5)
-            if row.Event == "Nonwear" and (start <= row.Start <= stop or start <= row.Stop <= stop):
-                ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, max(self.df_epoch["LWrist"])],
-                                  color='grey', alpha=.5)
-                ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, max(self.df_epoch["HR"].dropna()) * 1.1],
-                                  color='grey', alpha=.5)
+                if row.Event == "Sleep" and (start <= row.Start <= stop or start <= row.Stop <= stop):
+                    ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, max(self.df_epoch["LWrist"])],
+                                      color='navy', alpha=.35)
+                    ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, max(self.df_epoch["HR"].dropna()) * 1.1],
+                                      color='navy', alpha=.35)
+                if row.Event == "Nonwear" and (start <= row.Start <= stop or start <= row.Stop <= stop):
+                    ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, max(self.df_epoch["LWrist"])],
+                                      color='grey', alpha=.75)
+                    ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, max(self.df_epoch["HR"].dropna()) * 1.1],
+                                      color='grey', alpha=.75)
+
+        if show_thresholds:
+            ax1.axhline(self.cutpoint_dict["NonDomLight"], color='green', linestyle='dashed')
+            ax1.axhline(self.cutpoint_dict["NonDomModerate"], color='orange', linestyle='dashed')
+            ax1.axhline(self.cutpoint_dict["NonDomVigorous"], color='red', linestyle='dashed')
+
+            ax2.axhline(self.hr_zones["Light"], color='green', linestyle='dashed')
+            ax2.axhline(self.hr_zones["Moderate"], color='orange', linestyle='dashed')
+            ax2.axhline(self.hr_zones["Vigorous"], color='red', linestyle='dashed')
 
         window_len = (stop - start).total_seconds()
         ax2.set_xlim(start + timedelta(seconds=-window_len/20), stop + timedelta(seconds=window_len/20))
 
-    def compare_wrist_hr_intensity(self, start=None, stop=None, remove_invalid_hr=False):
+        if save_plot:
+            print("Plot saved as EpochedTimeSeries.png")
+            plt.savefig("EpochedTimeSeries.png")
+
+    def compare_wrist_hr_intensity(self, start=None, stop=None, remove_invalid_hr=False, show_events=False):
 
         if start is not None and stop is not None:
             df = self.df_epoch.loc[(self.df_epoch["Timestamp"] >= start) & (self.df_epoch["Timestamp"] <= stop)].copy()
@@ -236,18 +286,19 @@ class Subject:
         ax2.xaxis.set_major_formatter(xfmt)
         plt.xticks(rotation=45, fontsize=8)
 
-        for row in self.df_event.itertuples():
+        if show_events:
+            for row in self.df_event.itertuples():
 
-            if row.Event == "Sleep" and (start <= row.Start <= stop or start <= row.Stop <= stop):
-                ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
-                                  color='navy', alpha=.5)
-                ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
-                                  color='navy', alpha=.5)
-            if row.Event == "Nonwear" and (start <= row.Start <= stop or start <= row.Stop <= stop):
-                ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
-                                  color='grey', alpha=.5)
-                ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
-                                  color='grey', alpha=.5)
+                if row.Event == "Sleep" and (start <= row.Start <= stop or start <= row.Stop <= stop):
+                    ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
+                                      color='navy', alpha=.5)
+                    ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
+                                      color='navy', alpha=.5)
+                if row.Event == "Nonwear" and (start <= row.Start <= stop or start <= row.Stop <= stop):
+                    ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
+                                      color='grey', alpha=.5)
+                    ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
+                                      color='grey', alpha=.5)
 
         ax1.set_yticks(np.arange(0, 4, 1))
         ax2.set_yticks(np.arange(0, 4, 1))
@@ -395,13 +446,14 @@ class Subject:
         print("-No {}-minute bouts founds.".format(min_dur))
         print("-Longest MVPA bout was {} minutes.".format(longest * 15 / 60))
 
-    def analyze_hrv(self):
+    def analyze_hrv(self, save_plot=False):
         """Plots histograms of all epoch's RR SD and during sedentary periods only. Shades in data regions with
            data from Shaffer, F. & Ginsberg, P. (2017). An Overview of Heart Rate Variability Metrics and Norms."""
 
         df = self.df_epoch.copy()
 
         plt.subplots(1, 2, figsize=(self.fig_width, self.fig_height))
+        plt.title("HRV with interpretation (Shaffer & Ginsberg, 2017)")
 
         plt.subplot(1, 2, 1)
         h = plt.hist(df["RR_SD"].dropna(), bins=np.arange(0, 250, 10),
@@ -439,8 +491,14 @@ class Subject:
                           label="Healthy ({}%)".format(round(sum(h[0][10:]), 1)))
         plt.legend()
 
-    def analyze_sleep(self):
+        if save_plot:
+            print("Saving plot as HRV_Histogram.png")
+            plt.savefig("HRV_Histogram.png")
+
+    def analyze_sleep(self, save_plot=False):
         """Barplot of nightly sleep durations. Recommended range marked."""
+
+        print("\nPlotting sleep data...")
 
         df = self.df_event.loc[self.df_event["Event"] == "Sleep"]
         df["Durations"] = [(df["Stop"].iloc[i] - df["Start"].iloc[i]).total_seconds() / 3600 for
@@ -458,7 +516,11 @@ class Subject:
         for sleep in df.itertuples():
             plt.text(x=sleep.Index-.20, y=4, s=str(round(sleep.Durations, 1)) + "\nhours")
 
-    def calculate_activity_volume(self, remove_invalid_ecg=True, show_plot=True):
+        if save_plot:
+            print("Saved plot as SleepDurations.png")
+            plt.savefig("SleepDurations.png")
+
+    def calculate_total_activity_volume(self, remove_invalid_ecg=True, show_plot=True):
         """Calculates activity volumes (minutes and percent of data) for LWrist and HR data. Able to crop.
 
            :argument
@@ -625,32 +687,144 @@ class Subject:
         plt.title("HR MVPA")
 
         # Dataframe ---------------------------------------------------------------------------------------------------
-        df_vol = pd.DataFrame(list(zip(day_list, wrist_sed, hr_sed, wrist_light, hr_light, wrist_mvpa, hr_mvpa)),
-                              columns=["Day", "Wrist_Sed", "HR_Sed", "Wrist_Light",
-                                       "HR_Light", "Wrist_MVPA", "HR_MVPA"])
+        self.df_daily_volumes = pd.DataFrame(list(zip(day_list, wrist_sed, hr_sed, wrist_light,
+                                                      hr_light, wrist_mvpa, hr_mvpa)),
+                                             columns=["Day", "Wrist_Sed", "HR_Sed", "Wrist_Light",
+                                                      "HR_Light", "Wrist_MVPA", "HR_MVPA"])
 
         if save_csv:
-            df_vol.to_csv("DailyActivityVolume.csv", index=False)
+            self.df_daily_volumes.to_csv("DailyActivityVolume.csv", index=False)
             print("Saved file as DailyActivityVolume.csv.")
+
+    def calculate_wrist_ee(self):
+        """Calculates Wrist accelerometer intensity using regression equation from Powell et al., 2017."""
+
+        data = [i * (30 / 75) for i in self.df_epoch["LWrist"]]
+
+        # Modified equation from Powell et al. 2017. Removed resting component (constant = 1.15451)
+        mets = [.022261 * i for i in data]
+
+        # Converts METs to relative VO2 (mL O2/kg/min)
+        r_vo2 = [3.5 * m for m in mets]
+
+        # Converts relative VO2 to absolute VO2 (L O2/kg/min)
+        a_vo2 = [i * self.weight / 1000 for i in r_vo2]
+
+        # Converts absolute VO2 to kcal/min (assumes 1 L O2 -> 4.825 kcal)
+        kcal_min = [a * 4.825 for a in a_vo2]
+
+        # Calculates kcal/epoch
+        kcal_epoch = [k * (15 / 60) for k in kcal_min]
+
+        total_ee = sum([i for i in kcal_epoch if not np.isnan(i)])
+        print("-Total energy expenditure estimated from Wrist is {} kcal.".format(int(total_ee)))
+
+        self.df_epoch["Wrist_EE"] = kcal_min
+
+    def calculate_hr_ee(self):
+        """Calculates Physical Activity Intensity using equation from Brage et al., 2004.
+        Brage, S., Brage, N., Franks, P., Ekelund, U., Wong, M., Andersen, L., et al. (2004). Branched equation
+        modeling of simultaneous accelerometry and heart rate monitoring improves estimate of directly measured
+        physical activity energy expenditure. J Appl Physiol. 96. 343-351.
+        """
+
+        # HR - resting HR = net HR
+        net_hr = np.array([i - self.rest_hr if i is not None else None for i in self.df_epoch["HR"]])
+
+        # Sets values below 0% HRR (below resting HR) to 0
+        net_hr[net_hr <= 0] = 0
+
+        # Equation from Brage et al., 2004. Active EE in kJ/kg/min
+        kj_kg_min = [.011 * (hr ** 2) + 5.82 * hr if hr is not None else None for hr in net_hr]
+
+        # Converts kJ to kcal: relative EE (kcal/kg/min)
+        kcal_kg_min = [k / 4.184 if k is not None else None for k in kj_kg_min]
+
+        # Converts relative EE to absolute EE (kcal/min)
+        kcal_min = [k * self.weight / 1000 if k is not None else None for k in kcal_kg_min]
+
+        # kcals per epoch instead of per minute
+        kcal_epoch = [k * (15 / 60) for k in kcal_min]
+
+        total_ee = sum([i for i in kcal_epoch if not np.isnan(i)])
+        print("-Total energy expenditure estimated from HR is {} kcal.".format(int(total_ee)))
+
+        self.df_epoch["HR_EE"] = kcal_min
+
+    def plot_ee(self, save_plot=False):
+
+        # Calculates active energy expenditure (level above resting) -------------------------------------------------
+        print("\nCalculating energy expenditure...")
+        self.calculate_hr_ee()
+        self.calculate_wrist_ee()
+
+        df = self.df_epoch.loc[self.df_epoch["ECG_Validity"] == "Valid"]
+
+        wrist = df["Wrist_EE"].sum() * (15 / 60)
+        hr = df["HR_EE"].sum() * (15 / 60)
+
+        print("    -Ignoring invalid ECG periods: wrist EE = {} kcal.".format(int(wrist)))
+
+        # Plotting ---------------------------------------------------------------------------------------------------
+        fig, (ax1, ax2, ax3) = plt.subplots(3, sharex='col', figsize=(self.fig_width, self.fig_height))
+        plt.suptitle("Active Energy Expenditure")
+        plt.subplots_adjust(hspace=.3)
+
+        ax1.set_title("LWrist")
+        ax1.plot(self.df_epoch["Timestamp"], self.df_epoch["LWrist"], color='black', label='Wrist')
+        ax1.set_ylabel("Counts")
+
+        ax2.set_title("Heart Rate")
+        ax2.plot(self.df_epoch["Timestamp"], self.df_epoch["HR"], color='red', label='HR')
+        ax2.set_ylabel("HR (bpm)")
+        ax2.axhline(y=self.rest_hr, linestyle='dashed', color='grey', label='Rest HR')
+        ax2.legend()
+
+        ax3.set_title("Energy Expenditure")
+        ax3.plot(self.df_epoch["Timestamp"], self.df_epoch["HR_EE"], color='red', label='HR')
+        ax3.plot(self.df_epoch["Timestamp"], self.df_epoch["Wrist_EE"], color='black', label='Wrist')
+        ax3.axhline(y=0, linestyle='dashed', color='grey')
+        ax3.set_ylabel("kcal/minute")
+        ax3.legend()
+
+        xfmt = mdates.DateFormatter("%Y/%m/%d\n%H:%M:%S")
+        ax1.xaxis.set_major_formatter(xfmt)
+        plt.xticks(rotation=45, fontsize=8)
+
+        if save_plot:
+            print("Plot saved as EnergyExpenditure.png")
+            plt.savefig("EnergyExpenditure.png")
 
 
 x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_Epoched.csv",
             event_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_EventLog.csv")
 
-# Plots LWrist counts and HR. Sleep/nonwear periods shaded.
-# x.plot_time_series(start=None, stop=None)
+# Plots LWrist counts and HR. Able to hide/show sleep/nonwear and activiity thresholds
+# x.plot_time_series(start=None, stop=None, show_events=True, show_thresholds=False, save_plot=True)
 
 # Plots LWrist and HR intensity. Sleep/nonwear periods shaded
-# x.compare_wrist_hr_intensity(remove_invalid_hr=False, start="2020-03-03 14:00:00", stop="2020-03-03 15:00:00")
+# x.compare_wrist_hr_intensity(show_events=False, remove_invalid_hr=False, start=None, stop=None)
 
 # Analyze activity patterns by 'day' or by 'hour'
-# x.calculate_activity_pattern(sort_by='hour', show_plot=True, save_csv=False)
+# x.calculate_activity_pattern(sort_by='day', show_plot=True, save_csv=False)
 
 # Finds MVPA bouts of duration min_dur with allowance for break of duration breaktime (minutes)
 # x.find_mvpa_bouts(min_dur=10, breaktime=2)
 
 # Calculates total activity volumes for LWrist and HR data
-# x.calculate_activity_volume()
+# x.calculate_total_activity_volume(remove_invalid_ecg=False, show_plot=True)
 
 # Calculates daily activity volumes for LWrist and HR data. Able to save as csv
 # x.calculate_daily_activity_volume(save_csv=False)
+
+# Generates histogram of all HR data
+# x.heartrate_histogram(save_plot=True)
+
+# Histogram of each epoch's HRV (SD of RR intervals)
+# x.analyze_hrv(save_plot=False)
+
+# Bar plot of each night's sleep duration with recommended range
+# x.analyze_sleep(save_plot=True)
+
+# Plots time series LWrist, HR, and estimated EE data
+# x.plot_ee(save_plot=False)
