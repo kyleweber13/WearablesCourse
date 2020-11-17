@@ -37,6 +37,7 @@ class Subject:
 
         self.activity_volume = None
         self.df_daily_volumes = None
+        self.activity_df = None
 
         # Runs methods -----------------------------------------------------------------------------------------------
         self.import_processed_data()
@@ -324,24 +325,32 @@ class Subject:
                            13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0, 22: 0, 23: 0}
             accel_tally = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0,
                           13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0, 22: 0, 23: 0}
+            accel_vals = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: [], 10: [], 11: [], 12: [],
+                          13: [], 14: [], 15: [], 16: [], 17: [], 18: [], 19: [], 20: [], 21: [], 22: [], 23: []}
 
             hr_dict = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0,
-                          13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0, 22: 0, 23: 0}
-            hr_tally = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0,
                        13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0, 22: 0, 23: 0}
+            hr_tally = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0, 10: 0, 11: 0, 12: 0,
+                        13: 0, 14: 0, 15: 0, 16: 0, 17: 0, 18: 0, 19: 0, 20: 0, 21: 0, 22: 0, 23: 0}
+            hr_vals = {0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [], 9: [], 10: [], 11: [], 12: [],
+                        13: [], 14: [], 15: [], 16: [], 17: [], 18: [], 19: [], 20: [], 21: [], 22: [], 23: []}
 
             for row in self.df_epoch.itertuples():
                 if row.Wear_Status == "Wear":
                     accel_dict[row.Timestamp.hour] += row.LWrist
                     accel_tally[row.Timestamp.hour] += 1
+                    accel_vals[row.Timestamp.hour].append(row.LWrist)
 
                     if row.ECG_Validity == "Valid":
                         hr_dict[row.Timestamp.hour] += row.HR
                         hr_tally[row.Timestamp.hour] += 1
+                        hr_vals[row.Timestamp.hour].append(row.HR)
 
             accel_averages = [s / t if t != 0 else 0 for s, t in zip(accel_dict.values(), accel_tally.values())]
+            accel_sd = [np.std(i) for i in accel_vals.values()]
 
             hr_averages = [s / t if t != 0 else 0 for s, t in zip(hr_dict.values(), hr_tally.values())]
+            hr_sd = [np.std(i) for i in hr_vals.values()]
 
             r = scipy.stats.pearsonr(accel_averages, hr_averages)
             print("-Hourly correlation between average counts and HR: r = {}".format(round(r[0], 3)))
@@ -350,20 +359,21 @@ class Subject:
                 fig, (ax1, ax2) = plt.subplots(2, figsize=(self.fig_width, self.fig_height))
                 plt.subplots_adjust(hspace=.25)
                 ax1.set_title("Average Hourly Activity Counts")
-                ax1.bar(accel_dict.keys(), accel_averages, align='center',
-                        edgecolor='black', color='grey', width=1, alpha=.75)
+                ax1.bar(accel_dict.keys(), accel_averages, yerr=accel_sd, capsize=4, align='center',
+                        edgecolor='black', color='grey', width=1, alpha=.75, linewidth=1.5)
                 ax1.set_ylabel("Counts")
                 ax1.set_xticks(np.arange(0, 24, 1))
 
                 ax2.set_title("Average Hourly Heart Rate (invalid ECG removed)")
-                ax2.bar(hr_dict.keys(), hr_averages, align='center',
-                        edgecolor='black', color='red', width=1, alpha=.5)
+                ax2.bar(hr_dict.keys(), hr_averages, yerr=hr_sd, capsize=4, align='center',
+                        edgecolor='black', color='red', width=1, alpha=.5, linewidth=2)
                 ax2.axhline(self.rest_hr, color='black', linestyle='dashed', label="Resting HR")
                 ax2.set_ylim(self.rest_hr * .75, )
                 ax2.set_xticks(np.arange(0, 24, 1))
                 ax2.set_ylabel("HR (bpm)")
                 ax2.set_xlabel("Hour of Day")
                 ax2.legend()
+                plt.show()
 
             if save_csv:
                 df = pd.DataFrame(list(zip(accel_dict.keys(), accel_averages, hr_averages)),
@@ -374,29 +384,36 @@ class Subject:
 
         def sortby_day():
             # Day of week: Monday = 0, Sunday = 6
-            day_list = ["Monday", "Tus"]
             accel_dict = {"Monday": 0, "Tuesday": 0, "Wednesday": 0, "Thursday": 0,
                           "Friday": 0, "Saturday": 0, "Sunday": 0}
             accel_tally = {"Monday": 0, "Tuesday": 0, "Wednesday": 0, "Thursday": 0,
                           "Friday": 0, "Saturday": 0, "Sunday": 0}
+            accel_vals = {"Monday": [], "Tuesday": [], "Wednesday": [], "Thursday": [],
+                          "Friday": [], "Saturday": [], "Sunday": []}
 
             hr_dict = {"Monday": 0, "Tuesday": 0, "Wednesday": 0, "Thursday": 0,
                           "Friday": 0, "Saturday": 0, "Sunday": 0}
             hr_tally = {"Monday": 0, "Tuesday": 0, "Wednesday": 0, "Thursday": 0,
                           "Friday": 0, "Saturday": 0, "Sunday": 0}
+            hr_vals = {"Monday": [], "Tuesday": [], "Wednesday": [], "Thursday": [],
+                       "Friday": [], "Saturday": [], "Sunday": []}
 
             for row in self.df_epoch.itertuples():
                 if row.Wear_Status == "Wear":
                     accel_dict[row.Timestamp.day_name()] += row.LWrist
                     accel_tally[row.Timestamp.day_name()] += 1
+                    accel_vals[row.Timestamp.day_name()].append(row.LWrist)
 
                     if row.ECG_Validity == "Valid":
                         hr_dict[row.Timestamp.day_name()] += row.HR
                         hr_tally[row.Timestamp.day_name()] += 1
+                        hr_vals[row.Timestamp.day_name()].append(row.HR)
 
             accel_averages = [s / t if t != 0 else 0 for s, t in zip(accel_dict.values(), accel_tally.values())]
+            accel_sd = [np.std(i) for i in accel_vals.values()]
 
             hr_averages = [s / t if t != 0 else 0 for s, t in zip(hr_dict.values(), hr_tally.values())]
+            hr_sd = [np.std(i) for i in hr_vals.values()]
 
             r = scipy.stats.pearsonr(accel_averages, hr_averages)
             print("-Daily correlation between average counts and HR: r = {}".format(round(r[0], 3)))
@@ -406,18 +423,19 @@ class Subject:
                 plt.subplots_adjust(hspace=.25)
 
                 ax1.set_title("Average Daily Activity Counts")
-                ax1.bar(accel_dict.keys(), accel_averages, align='center',
-                        edgecolor='black', color='grey', width=1, alpha=.75)
+                ax1.bar(accel_dict.keys(), accel_averages, align='center', yerr=accel_sd, capsize=4,
+                        edgecolor='black', color='grey', width=1, alpha=.75, linewidth=1.5)
                 ax1.set_ylabel("Counts")
 
                 ax2.set_title("Average Daily Heart Rate (invalid ECG removed)")
-                ax2.bar(hr_dict.keys(), hr_averages, align='center',
-                        edgecolor='black', color='red', width=1, alpha=.5)
+                ax2.bar(hr_dict.keys(), hr_averages, align='center', yerr=hr_sd, capsize=4,
+                        edgecolor='black', color='red', width=1, alpha=.5, linewidth=1.5)
                 ax2.axhline(self.rest_hr, color='black', linestyle='dashed', label="Resting HR")
                 ax2.set_ylim(self.rest_hr * .75, )
                 ax2.set_ylabel("HR (bpm)")
                 ax2.set_xlabel("Hour of Day")
                 ax2.legend()
+                plt.show()
 
             if save_csv:
                 df = pd.DataFrame(list(zip(accel_dict.keys(), accel_averages, hr_averages)),
@@ -515,7 +533,10 @@ class Subject:
             data.to_csv("HRV_FrequencyData.csv", index=False)
 
     def analyze_sleep(self, save_plot=False, save_data=False):
-        """Barplot of nightly sleep durations. Recommended range marked."""
+        """Barplot of nightly sleep durations. Recommended range marked.
+           Norms from Boulous et al. (2019). Normal polysomnography parameters in healthy adults: a systematic
+           review and meta-analysis.
+        """
 
         print("\nPlotting sleep data...")
 
@@ -526,10 +547,11 @@ class Subject:
         plt.bar([df["Start"].iloc[i].day_name() for i in range(df.shape[0])],
                 df["Durations"], color='slategrey', alpha=.75, edgecolor='black')
         plt.ylabel("Hours per night")
-        plt.title("Nightly Sleep Duration")
+        plt.title("Nightly Sleep Duration\n(normative data for 65-79 year olds)")
 
-        plt.axhline(y=9, color='green', linestyle='dashed', label="Recommended max.")
-        plt.axhline(y=7, color='red', linestyle='dashed', label="Recommended min.")
+        plt.axhline(y=365.4/60, color='red', linestyle='dashed', label="95%ile")
+        plt.axhline(y=346/60, color='black', linestyle='dashed', label='Mean')
+        plt.axhline(y=326.7/60, color='red', linestyle='dashed', label="5%ile")
         plt.legend(loc='lower right')
 
         for sleep in df.itertuples():
@@ -545,8 +567,9 @@ class Subject:
             data.to_csv("SleepDurations.csv", index=False)
             print("Data saved as SleepDurations.csv")
 
-    def calculate_total_activity_volume(self, remove_invalid_ecg=True, show_plot=True):
+    def calculate_total_activity_volume(self, remove_invalid_ecg=True, show_plot=True, show_norm_data=True):
         """Calculates activity volumes (minutes and percent of data) for LWrist and HR data. Able to crop.
+           Normative data from https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1310033801
 
            :argument
            -remove_invalid_ecg: boolean whether to include invalid ECG signal periods.
@@ -554,6 +577,13 @@ class Subject:
                                 If False, LWrist contains more data.
         """
 
+        # Normative data ==============================================================================================
+        study_dur = (self.df_epoch["Timestamp"].iloc[-1] - self.df_epoch["Timestamp"][0]).total_seconds() / 86400
+        norm_data = {"Sedentary": round(590 * study_dur, 0), "Light": round(193 * study_dur, 0), "Moderate": None,
+                     "Vigorous": None, "MVPA": round(18 * study_dur, 0)}
+        norm_data["Non-sedentary"] = norm_data["MVPA"] + norm_data["Light"]
+
+        # Data ========================================================================================================
         df = self.df_epoch.loc[self.df_epoch["Wear_Status"] == "Wear"]
 
         if remove_invalid_ecg:
@@ -592,16 +622,19 @@ class Subject:
 
         activity_minutes["LWristMVPA"] = activity_minutes["LWristMod"] + activity_minutes["LWristVig"]
         activity_minutes["HRMVPA"] = activity_minutes["HRMod"] + activity_minutes["HRVig"]
+        activity_minutes["HRAll"] = activity_minutes["HRMVPA"] + activity_minutes["HRLight"]
+        activity_minutes["LWristAll"] = activity_minutes["LWristMVPA"] + activity_minutes["LWristLight"]
 
         self.activity_volume = activity_minutes
-        lwrist = [activity_minutes["LWristSed"], activity_minutes["LWristLight"],
-                  activity_minutes["LWristMod"], activity_minutes["LWristVig"], activity_minutes["LWristMVPA"]]
+        lwrist = [activity_minutes["LWristSed"], activity_minutes["LWristLight"], activity_minutes["LWristMod"],
+                  activity_minutes["LWristVig"], activity_minutes["LWristMVPA"], activity_minutes["LWristAll"]]
 
-        hr = [activity_minutes["HRSed"], activity_minutes["HRLight"],
-              activity_minutes["HRMod"], activity_minutes["HRVig"], activity_minutes["HRMVPA"]]
+        hr = [activity_minutes["HRSed"], activity_minutes["HRLight"], activity_minutes["HRMod"],
+              activity_minutes["HRVig"], activity_minutes["HRMVPA"], activity_minutes["HRAll"]]
 
-        self.activity_df = pd.DataFrame(list(zip(lwrist, hr)), columns=["LWrist", "HR"])
-        self.activity_df.index = ["Sedentary", "Light", "Moderate", "Vigorous", "MVPA"]
+        self.activity_df = pd.DataFrame(list(zip(lwrist, hr, [i for i in norm_data.values()])),
+                                        columns=["LWrist", "HR", "Norms"])
+        self.activity_df.index = ["Sedentary", "Light", "Moderate", "Vigorous", "MVPA", "All"]
 
         self.activity_df["LWrist%"] = 100 * self.activity_df["LWrist"] / \
                                       sum(self.activity_df["LWrist"].loc[["Sedentary", "Light",
@@ -622,27 +655,50 @@ class Subject:
 
             df = self.activity_df[["LWrist", "HR"]]
 
-            plt.subplots(2, 2, figsize=(self.fig_width, self.fig_height))
-            plt.suptitle("Comparison between LWrist and HR activity volumes")
+            plt.subplots(2, 3, figsize=(self.fig_width, self.fig_height))
+
+            if not show_norm_data:
+                plt.suptitle("Comparison between LWrist and HR activity volumes")
+
+            if show_norm_data:
+                plt.suptitle("Comparison between LWrist and HR activity volumes\n"
+                             "(Dotted line is Canadian average, ages 60-79)")
             plt.subplots_adjust(hspace=.3)
 
-            plt.subplot(2, 2, 1)
+            plt.subplot(2, 3, 1)
             plt.bar(["LWrist", "HR"], df.loc["Sedentary"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
             plt.title("Sedentary")
             plt.ylabel("Minutes")
 
-            plt.subplot(2, 2, 2)
+            if show_norm_data:
+                plt.axhline(y=norm_data["Sedentary"], linestyle='dashed', color='black')
+
+            plt.subplot(2, 3, 2)
             plt.bar(["LWrist", "HR"], df.loc["Light"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
             plt.title("Light")
 
-            plt.subplot(2, 2, 3)
+            plt.subplot(2, 3, 3)
             plt.bar(["LWrist", "HR"], df.loc["Moderate"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
-            plt.ylabel("Minutes")
             plt.title("Moderate")
 
-            plt.subplot(2, 2, 4)
+            plt.subplot(2, 3, 4)
             plt.bar(["LWrist", "HR"], df.loc["Vigorous"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
             plt.title("Vigorous")
+            plt.ylabel("Minutes")
+
+            plt.subplot(2, 3, 5)
+            plt.bar(["LWrist", "HR"], df.loc["MVPA"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("MVPA")
+
+            if show_norm_data:
+                plt.axhline(y=norm_data["MVPA"], linestyle='dashed', color='black')
+
+            plt.subplot(2, 3, 6)
+            plt.bar(["LWrist", "HR"], df.loc["All"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Non-sedentary")
+
+            if show_norm_data:
+                plt.axhline(y=norm_data["Non-sedentary"], linestyle='dashed', color='black')
 
     def calculate_daily_activity_volume(self, save_csv=False, save_plot=False):
 
@@ -824,6 +880,28 @@ class Subject:
             print("Plot saved as EnergyExpenditure.png")
             plt.savefig("EnergyExpenditure.png")
 
+    def plot_ecg_signal_quality(self, save_plot=False):
+
+        print("\nPlotting ECG signal quality...")
+
+        fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
+        plt.subplots_adjust(hspace=.25)
+
+        ax1.scatter(self.df_epoch["Timestamp"], self.df_epoch["ECG_Validity"], s=1, color='red')
+        ax1.set_title("ECG Signal Validity")
+
+        ax2.plot(self.df_epoch["Timestamp"], self.df_epoch["LWrist"], color='dodgerblue')
+        ax2.set_ylabel("Counts")
+        ax2.set_title("LWrist")
+
+        xfmt = mdates.DateFormatter("%Y/%m/%d\n%H:%M:%S")
+        ax2.xaxis.set_major_formatter(xfmt)
+        plt.xticks(rotation=45, fontsize=8)
+
+        if save_plot:
+            print("Plot saved as ECG_SignalValidity.png")
+            plt.savefig("ECG_SignalValidity.png")
+
 
 x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_Epoched.csv",
             event_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_EventLog.csv")
@@ -841,7 +919,7 @@ x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/Wearable
 # x.find_mvpa_bouts(min_dur=10, breaktime=2)
 
 # Calculates total activity volumes for LWrist and HR data
-# x.calculate_total_activity_volume(remove_invalid_ecg=False, show_plot=True)
+# x.calculate_total_activity_volume(remove_invalid_ecg=False, show_plot=True, show_norm_data=True)
 
 # Calculates daily activity volumes for LWrist and HR data. Able to save as csv
 # x.calculate_daily_activity_volume(save_csv=False, save_plot=False)
@@ -857,3 +935,6 @@ x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/Wearable
 
 # Plots time series LWrist, HR, and estimated EE data
 # x.plot_ee(save_plot=False)
+
+# Plots ECG signal quality over LWrist SVM data
+x.plot_ecg_signal_quality(save_plot=False)
