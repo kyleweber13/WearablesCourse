@@ -225,9 +225,9 @@ class Subject:
 
                 if row.Event == "Sleep" and (start <= row.Start <= stop or start <= row.Stop <= stop):
                     ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, max(self.df_epoch["LWrist"])],
-                                      color='navy', alpha=.35)
+                                      color='dodgerblue', alpha=.35)
                     ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[40, max(self.df_epoch["HR"].dropna()) * 1.1],
-                                      color='navy', alpha=.35)
+                                      color='dodgerblue', alpha=.35)
                 if row.Event == "Nonwear" and (start <= row.Start <= stop or start <= row.Stop <= stop):
                     ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, max(self.df_epoch["LWrist"])],
                                       color='grey', alpha=.75)
@@ -239,6 +239,7 @@ class Subject:
             ax1.axhline(self.cutpoint_dict["NonDomModerate"], color='orange', linestyle='dashed')
             ax1.axhline(self.cutpoint_dict["NonDomVigorous"], color='red', linestyle='dashed')
 
+            ax2.axhline(self.rest_hr, color='black', linestyle='dashed')
             ax2.axhline(self.hr_zones["Light"], color='green', linestyle='dashed')
             ax2.axhline(self.hr_zones["Moderate"], color='orange', linestyle='dashed')
             ax2.axhline(self.hr_zones["Vigorous"], color='red', linestyle='dashed')
@@ -250,7 +251,10 @@ class Subject:
             print("Plot saved as EpochedTimeSeries.png")
             plt.savefig("EpochedTimeSeries.png")
 
-    def compare_wrist_hr_intensity(self, start=None, stop=None, remove_invalid_hr=False, show_events=False):
+    def compare_wrist_hr_intensity(self, start=None, stop=None, remove_invalid_hr=False,
+                                   show_events=False, save_plot=False):
+
+        print("\nPlotting time series intensity data...")
 
         if start is not None and stop is not None:
             df = self.df_epoch.loc[(self.df_epoch["Timestamp"] >= start) & (self.df_epoch["Timestamp"] <= stop)].copy()
@@ -291,9 +295,9 @@ class Subject:
 
                 if row.Event == "Sleep" and (start <= row.Start <= stop or start <= row.Stop <= stop):
                     ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
-                                      color='navy', alpha=.5)
+                                      color='dodgerblue', alpha=.5)
                     ax2.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
-                                      color='navy', alpha=.5)
+                                      color='dodgerblue', alpha=.5)
                 if row.Event == "Nonwear" and (start <= row.Start <= stop or start <= row.Stop <= stop):
                     ax1.fill_betweenx(x1=row.Start, x2=row.Stop, y=[0, 3],
                                       color='grey', alpha=.5)
@@ -306,7 +310,11 @@ class Subject:
         window_len = (stop - start).total_seconds()
         ax2.set_xlim(start + timedelta(seconds=-window_len/20), stop + timedelta(seconds=window_len/20))
 
-    def calculate_activity_pattern(self, sort_by='hour', show_plot=True, save_csv=False):
+        if save_plot:
+            print("Plot saved as Intensity_TimeSeries.png")
+            plt.savefig("Intensity_TimeSeries.png")
+
+    def calculate_activity_pattern(self, sort_by='hour', show_plot=True, save_plot=False, save_csv=False):
         """Calculates average counts and HR by either hour of day or by day of week. Generates histogram."""
 
         print("\nAnalyzing activity trends by {}...".format(sort_by))
@@ -423,6 +431,10 @@ class Subject:
         if sort_by == "day":
             sortby_day()
 
+        if save_plot:
+            print("Plot saved as ActivityPattern_{}.png".format(sort_by))
+            plt.savefig("ActivityPattern_{}.png".format(sort_by))
+
     def find_mvpa_bouts(self, min_dur=10, breaktime=2):
         """Finds MVPA bouts of duration min_dur allowing for a break of breaktime minutes. Also finds longest MVPA
            bout and prints result.
@@ -446,7 +458,7 @@ class Subject:
         print("-No {}-minute bouts founds.".format(min_dur))
         print("-Longest MVPA bout was {} minutes.".format(longest * 15 / 60))
 
-    def analyze_hrv(self, save_plot=False):
+    def analyze_hrv(self, save_plot=False, save_csv=False):
         """Plots histograms of all epoch's RR SD and during sedentary periods only. Shades in data regions with
            data from Shaffer, F. & Ginsberg, P. (2017). An Overview of Heart Rate Variability Metrics and Norms."""
 
@@ -495,7 +507,14 @@ class Subject:
             print("Saving plot as HRV_Histogram.png")
             plt.savefig("HRV_Histogram.png")
 
-    def analyze_sleep(self, save_plot=False):
+        if save_csv:
+            print("Data saved as HRV_FrequencyData.csv")
+            bins = [i for i in h[1][:-1]]
+            freqs = [i for i in h[0]]
+            data = pd.DataFrame(list(zip(bins, freqs)), columns=["Bin", "Frequency_%"])
+            data.to_csv("HRV_FrequencyData.csv", index=False)
+
+    def analyze_sleep(self, save_plot=False, save_data=False):
         """Barplot of nightly sleep durations. Recommended range marked."""
 
         print("\nPlotting sleep data...")
@@ -519,6 +538,12 @@ class Subject:
         if save_plot:
             print("Saved plot as SleepDurations.png")
             plt.savefig("SleepDurations.png")
+
+        if save_data:
+            data = pd.DataFrame(list(zip([df["Start"].iloc[i].day_name() for i in range(df.shape[0])],
+                                         df["Durations"])), columns=["Day", "HoursSlept"])
+            data.to_csv("SleepDurations.csv", index=False)
+            print("Data saved as SleepDurations.csv")
 
     def calculate_total_activity_volume(self, remove_invalid_ecg=True, show_plot=True):
         """Calculates activity volumes (minutes and percent of data) for LWrist and HR data. Able to crop.
@@ -619,7 +644,7 @@ class Subject:
             plt.bar(["LWrist", "HR"], df.loc["Vigorous"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
             plt.title("Vigorous")
 
-    def calculate_daily_activity_volume(self, save_csv=False):
+    def calculate_daily_activity_volume(self, save_csv=False, save_plot=False):
 
         print("\nCalculating daily activity volumes...")
 
@@ -695,6 +720,10 @@ class Subject:
         if save_csv:
             self.df_daily_volumes.to_csv("DailyActivityVolume.csv", index=False)
             print("Saved file as DailyActivityVolume.csv.")
+
+        if save_plot:
+            print("Saved plot as DailyActivityVolume.png")
+            plt.savefig("DailyActivityVolume.png")
 
     def calculate_wrist_ee(self):
         """Calculates Wrist accelerometer intensity using regression equation from Powell et al., 2017."""
@@ -800,13 +829,13 @@ x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/Wearable
             event_filename="/Users/kyleweber/Desktop/Python Scripts/WearablesCourse/Data Files/Lab 9/Lab9_EventLog.csv")
 
 # Plots LWrist counts and HR. Able to hide/show sleep/nonwear and activiity thresholds
-# x.plot_time_series(start=None, stop=None, show_events=True, show_thresholds=False, save_plot=True)
+# x.plot_time_series(start=None, stop=None, show_events=True, show_thresholds=True, save_plot=False)
 
 # Plots LWrist and HR intensity. Sleep/nonwear periods shaded
-# x.compare_wrist_hr_intensity(show_events=False, remove_invalid_hr=False, start=None, stop=None)
+# x.compare_wrist_hr_intensity(show_events=False, remove_invalid_hr=False, start=None, stop=None, save_plot=False)
 
 # Analyze activity patterns by 'day' or by 'hour'
-# x.calculate_activity_pattern(sort_by='day', show_plot=True, save_csv=False)
+# x.calculate_activity_pattern(sort_by='day', show_plot=True, save_plot=False, save_csv=False)
 
 # Finds MVPA bouts of duration min_dur with allowance for break of duration breaktime (minutes)
 # x.find_mvpa_bouts(min_dur=10, breaktime=2)
@@ -815,16 +844,16 @@ x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/Wearable
 # x.calculate_total_activity_volume(remove_invalid_ecg=False, show_plot=True)
 
 # Calculates daily activity volumes for LWrist and HR data. Able to save as csv
-# x.calculate_daily_activity_volume(save_csv=False)
+# x.calculate_daily_activity_volume(save_csv=False, save_plot=False)
 
 # Generates histogram of all HR data
-# x.heartrate_histogram(save_plot=True)
+# x.heartrate_histogram(save_plot=False)
 
 # Histogram of each epoch's HRV (SD of RR intervals)
-# x.analyze_hrv(save_plot=False)
+# x.analyze_hrv(save_plot=False, save_csv=False)
 
 # Bar plot of each night's sleep duration with recommended range
-# x.analyze_sleep(save_plot=True)
+# x.analyze_sleep(save_plot=False, save_data=False)
 
 # Plots time series LWrist, HR, and estimated EE data
 # x.plot_ee(save_plot=False)
