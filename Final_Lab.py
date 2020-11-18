@@ -65,6 +65,10 @@ class Subject:
             self.df_event["Start"] = pd.to_datetime(self.df_event["Start"])
             self.df_event["Stop"] = pd.to_datetime(self.df_event["Stop"])
 
+            self.df_event["Durations"] = [(self.df_event["Stop"].iloc[i] -
+                                           self.df_event["Start"].iloc[i]).total_seconds() / 3600 for
+                                          i in range(self.df_event.shape[0])]
+
         print("Complete.")
 
     def flag_nonwear(self):
@@ -170,20 +174,23 @@ class Subject:
         plt.axvline(x=self.rest_hr, linestyle='dashed', color='black', label='Resting HR')
         plt.axvline(x=208 - .7 * self.age, linestyle='dashed', color='red', label="Max HR")
 
-        plt.fill_between(x=[0, self.hr_zones["Light"]], y1=0, y2=100,
-                         color='grey', alpha=.5, label="Sedentary")
-        plt.fill_between(x=[self.hr_zones["Light"], self.hr_zones["Moderate"]], y1=0, y2=100,
-                         color='green', alpha=.5, label="Light")
-        plt.fill_between(x=[self.hr_zones["Moderate"], self.hr_zones["Vigorous"]], y1=0, y2=100,
-                         color='orange', alpha=.5, label="Moderate")
-        plt.fill_between(x=[self.hr_zones["Vigorous"], 208 - .7 * self.age], y1=0, y2=100,
-                         color='red', alpha=.5, label="Vigorous")
-
         data = plt.hist(hr, bins=np.arange(0, 200, 5), weights=100 * np.ones(len(hr)) / len(hr),
                         color='white', alpha=.5, edgecolor='black')
         plt.xlabel("HR (bpm)")
         plt.ylabel("% of epochs")
         plt.title("HR Distribution")
+
+        y_max = plt.ylim()[1]
+        plt.fill_between(x=[0, self.hr_zones["Light"]], y1=0, y2=y_max/2,
+                         color='grey', alpha=.5, label="Sedentary")
+        plt.fill_between(x=[self.hr_zones["Light"], self.hr_zones["Moderate"]], y1=0, y2=y_max/2,
+                         color='green', alpha=.5, label="Light")
+        plt.fill_between(x=[self.hr_zones["Moderate"], self.hr_zones["Vigorous"]], y1=0, y2=y_max/2,
+                         color='orange', alpha=.5, label="Moderate")
+        plt.fill_between(x=[self.hr_zones["Vigorous"], 208 - .7 * self.age], y1=0, y2=y_max/2,
+                         color='red', alpha=.5, label="Vigorous")
+        plt.fill_between(x=[50, 80], y1=y_max/2, y2=y_max,
+                         color='dodgerblue', alpha=.5, label="Normal resting HR")
 
         plt.legend(loc='upper right')
         plt.ylim(0, max(data[0] * 1.05))
@@ -315,7 +322,8 @@ class Subject:
             print("Plot saved as Intensity_TimeSeries.png")
             plt.savefig("Intensity_TimeSeries.png")
 
-    def calculate_activity_pattern(self, sort_by='hour', show_plot=True, save_plot=False, save_csv=False):
+    def calculate_activity_pattern(self, sort_by='hour',
+                                   show_plot=True, save_plot=False, save_csv=False):
         """Calculates average counts and HR by either hour of day or by day of week. Generates histogram."""
 
         print("\nAnalyzing activity trends by {}...".format(sort_by))
@@ -541,8 +549,6 @@ class Subject:
         print("\nPlotting sleep data...")
 
         df = self.df_event.loc[self.df_event["Event"] == "Sleep"]
-        df["Durations"] = [(df["Stop"].iloc[i] - df["Start"].iloc[i]).total_seconds() / 3600 for
-                           i in range(df.shape[0])]
 
         plt.bar([df["Start"].iloc[i].day_name() for i in range(df.shape[0])],
                 df["Durations"], color='slategrey', alpha=.75, edgecolor='black')
@@ -665,6 +671,7 @@ class Subject:
                              "(Dotted line is Canadian average, ages 60-79)")
             plt.subplots_adjust(hspace=.3)
 
+            # SEDENTARY
             plt.subplot(2, 3, 1)
             plt.bar(["LWrist", "HR"], df.loc["Sedentary"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
             plt.title("Sedentary")
@@ -673,34 +680,40 @@ class Subject:
             if show_norm_data:
                 plt.axhline(y=norm_data["Sedentary"], linestyle='dashed', color='black')
 
+            # Non-sedentary
             plt.subplot(2, 3, 2)
-            plt.bar(["LWrist", "HR"], df.loc["Light"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
-            plt.title("Light")
-
-            plt.subplot(2, 3, 3)
-            plt.bar(["LWrist", "HR"], df.loc["Moderate"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
-            plt.title("Moderate")
-
-            plt.subplot(2, 3, 4)
-            plt.bar(["LWrist", "HR"], df.loc["Vigorous"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
-            plt.title("Vigorous")
-            plt.ylabel("Minutes")
-
-            plt.subplot(2, 3, 5)
-            plt.bar(["LWrist", "HR"], df.loc["MVPA"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
-            plt.title("MVPA")
-
-            if show_norm_data:
-                plt.axhline(y=norm_data["MVPA"], linestyle='dashed', color='black')
-
-            plt.subplot(2, 3, 6)
             plt.bar(["LWrist", "HR"], df.loc["All"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
             plt.title("Non-sedentary")
 
             if show_norm_data:
                 plt.axhline(y=norm_data["Non-sedentary"], linestyle='dashed', color='black')
 
-    def calculate_daily_activity_volume(self, save_csv=False, save_plot=False):
+            # MVPA
+            plt.subplot(2, 3, 3)
+            plt.bar(["LWrist", "HR"], df.loc["MVPA"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("MVPA")
+
+            if show_norm_data:
+                plt.axhline(y=norm_data["MVPA"], linestyle='dashed', color='black')
+
+            # LIGHT
+            plt.subplot(2, 3, 4)
+            plt.bar(["LWrist", "HR"], df.loc["Light"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Light")
+            plt.ylabel("Minutes")
+
+            # MODERATE
+            plt.subplot(2, 3, 5)
+            plt.bar(["LWrist", "HR"], df.loc["Moderate"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Moderate")
+
+            # VIGOROUS
+            plt.subplot(2, 3, 6)
+            plt.bar(["LWrist", "HR"], df.loc["Vigorous"], color=["dodgerblue", "red"], alpha=.75, edgecolor='black')
+            plt.title("Vigorous")
+
+    def calculate_daily_activity_volume(self, show_means=False, save_csv=False, save_plot=False):
+        """Normative data from https: // www150.statcan.gc.ca / t1 / tbl1 / en / tv.action?pid = 1310033801"""
 
         print("\nCalculating daily activity volumes...")
 
@@ -735,37 +748,69 @@ class Subject:
 
         # PLOTTING ---------------------------------------------------------------------------------------------------
         day_list = [j for j in [datetime.strftime(i, "%a") for i in date_list]]
-        plt.subplots(2, 3, figsize=(self.fig_width, self.fig_height))
-        plt.subplots_adjust(hspace=.25)
-        plt.title("Daily Activity")
+        norm_data = {"Sedentary": 590, "Light": 193, "MVPA": 18}
 
-        # WRIST
-        plt.subplot(2, 3, 1)
-        plt.bar(day_list, wrist_sed, color='grey', edgecolor='black')
-        plt.title("Wrist Sedentary")
-        plt.ylabel("Minutes")
+        if show_means:
+            plt.subplots(1, 3, figsize=(self.fig_width, self.fig_height))
+            plt.subplots_adjust(hspace=.25)
 
-        plt.subplot(2, 3, 2)
-        plt.bar(day_list, wrist_light, color='green', edgecolor='black')
-        plt.title("Wrist Light")
+            plt.suptitle("Daily Activity Means w/ Normative Data (60-79 y/o), Means ± SD (full days only)")
 
-        plt.subplot(2, 3, 3)
-        plt.bar(day_list, wrist_mvpa, color='orange', edgecolor='black')
-        plt.title("Wrist MVPA")
+            plt.subplot(1, 3, 1)
+            plt.bar(["LWrist", "HR"], [np.mean(wrist_sed[1:-1]), np.mean(hr_sed[1:-1])],
+                    yerr=[np.std(wrist_sed[1:-1]), np.std(hr_sed[1:-1])], capsize=4,
+                    color=['dodgerblue', 'red'], edgecolor='black')
+            plt.title("Sedentary (incl. sleep)")
+            plt.ylabel("Minutes per day")
 
-        # HR
-        plt.subplot(2, 3, 4)
-        plt.bar(day_list, hr_sed, color='grey', edgecolor='black')
-        plt.title("HR Sedentary")
-        plt.ylabel("Minutes")
+            plt.axhline(norm_data["Sedentary"], linestyle='dashed', color='black')
 
-        plt.subplot(2, 3, 5)
-        plt.bar(day_list, hr_light, color='green', edgecolor='black')
-        plt.title("HR Light")
+            plt.subplot(1, 3, 2)
+            plt.bar(["LWrist", "HR"], [np.mean(wrist_light[1:-1]), np.mean(hr_light[1:-1])],
+                    yerr=[np.std(wrist_light[1:-1]), np.std(hr_light[1:-1])], capsize=4,
+                    color=['dodgerblue', 'red'], edgecolor='black')
+            plt.title("Light")
+            plt.axhline(norm_data["Light"], linestyle='dashed', color='black')
 
-        plt.subplot(2, 3, 6)
-        plt.bar(day_list, hr_mvpa, color='orange', edgecolor='black')
-        plt.title("HR MVPA")
+            plt.subplot(1, 3, 3)
+            plt.bar(["LWrist", "HR"], [np.mean(wrist_mvpa[1:-1]), np.mean(hr_mvpa[1:-1])],
+                    yerr=[np.std(wrist_mvpa[1:-1]), np.std(hr_mvpa[1:-1])], capsize=4,
+                    color=['dodgerblue', 'red'], edgecolor='black')
+            plt.title("MVPA")
+            plt.axhline(norm_data["MVPA"], linestyle='dashed', color='black')
+
+        if not show_means:
+            plt.subplots(2, 3, figsize=(self.fig_width, self.fig_height))
+            plt.subplots_adjust(hspace=.25)
+            plt.title("Daily Activity")
+
+            # WRIST
+            plt.subplot(2, 3, 1)
+            plt.bar(day_list, wrist_sed, color='grey', edgecolor='black')
+            plt.title("Wrist Sedentary")
+            plt.ylabel("Minutes")
+
+            plt.subplot(2, 3, 2)
+            plt.bar(day_list, wrist_light, color='green', edgecolor='black')
+            plt.title("Wrist Light")
+
+            plt.subplot(2, 3, 3)
+            plt.bar(day_list, wrist_mvpa, color='orange', edgecolor='black')
+            plt.title("Wrist MVPA")
+
+            # HR
+            plt.subplot(2, 3, 4)
+            plt.bar(day_list, hr_sed, color='grey', edgecolor='black')
+            plt.title("HR Sedentary")
+            plt.ylabel("Minutes")
+
+            plt.subplot(2, 3, 5)
+            plt.bar(day_list, hr_light, color='green', edgecolor='black')
+            plt.title("HR Light")
+
+            plt.subplot(2, 3, 6)
+            plt.bar(day_list, hr_mvpa, color='orange', edgecolor='black')
+            plt.title("HR MVPA")
 
         # Dataframe ---------------------------------------------------------------------------------------------------
         self.df_daily_volumes = pd.DataFrame(list(zip(day_list, wrist_sed, hr_sed, wrist_light,
@@ -882,21 +927,29 @@ class Subject:
 
     def plot_ecg_signal_quality(self, save_plot=False):
 
-        print("\nPlotting ECG signal quality...")
+        date_range = sorted([i for i in set([j.date() for j in self.df_epoch["Timestamp"]])])
+        self.df_epoch["Date"] = [i.date() for i in self.df_epoch["Timestamp"]]
+        self.df_epoch["Time"] = [i.time() for i in self.df_epoch["Timestamp"]]
 
-        fig, (ax1, ax2) = plt.subplots(2, sharex='col', figsize=(self.fig_width, self.fig_height))
-        plt.subplots_adjust(hspace=.25)
+        fig = plt.figure(figsize=(self.fig_width, self.fig_height))
+        plt.subplots_adjust(hspace=.5)
+        plt.suptitle("ECG Validity Time Series")
 
-        ax1.scatter(self.df_epoch["Timestamp"], self.df_epoch["ECG_Validity"], s=1, color='red')
-        ax1.set_title("ECG Signal Validity")
+        for i, date in enumerate(date_range):
+            df = self.df_epoch.loc[self.df_epoch["Date"] == date]
+            valid = [i if i == "Invalid" else "Valid" for i in df["ECG_Validity"]]
 
-        ax2.plot(self.df_epoch["Timestamp"], self.df_epoch["LWrist"], color='dodgerblue')
-        ax2.set_ylabel("Counts")
-        ax2.set_title("LWrist")
+            ax = fig.add_subplot(5, 1, i + 1)
+            ax.plot(df['Timestamp'], valid, color='black')
+            ax.set_title(datetime.strftime(date, "%A, %B %d"))
+            ax.set_ylim(["Valid", "Invalid"])
 
-        xfmt = mdates.DateFormatter("%Y/%m/%d\n%H:%M:%S")
-        ax2.xaxis.set_major_formatter(xfmt)
-        plt.xticks(rotation=45, fontsize=8)
+            if i != len(date_range) - 1:
+                ax.axes.get_xaxis().set_ticks([])
+            if i == len(date_range) - 1:
+                xfmt = mdates.DateFormatter("%H:%M:%S")
+                ax.xaxis.set_major_formatter(xfmt)
+                plt.xticks(rotation=45, fontsize=8)
 
         if save_plot:
             print("Plot saved as ECG_SignalValidity.png")
@@ -922,7 +975,7 @@ x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/Wearable
 # x.calculate_total_activity_volume(remove_invalid_ecg=False, show_plot=True, show_norm_data=True)
 
 # Calculates daily activity volumes for LWrist and HR data. Able to save as csv
-# x.calculate_daily_activity_volume(save_csv=False, save_plot=False)
+# x.calculate_daily_activity_volume(show_means=True, save_csv=False, save_plot=False)
 
 # Generates histogram of all HR data
 # x.heartrate_histogram(save_plot=False)
@@ -936,5 +989,5 @@ x = Subject(processed_filename="/Users/kyleweber/Desktop/Python Scripts/Wearable
 # Plots time series LWrist, HR, and estimated EE data
 # x.plot_ee(save_plot=False)
 
-# Plots ECG signal quality over LWrist SVM data
-x.plot_ecg_signal_quality(save_plot=False)
+# Plots ECG signal quality time series data
+# x.plot_ecg_signal_quality(save_plot=False)
